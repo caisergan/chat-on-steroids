@@ -1791,8 +1791,11 @@ not permission to add more startup openers.
 ### Browser choice and opening discipline
 
 `browser.ts`, `browser-preferences.ts` and `browser-startup.ts` keep the selected supported
-Chromium browser/profile separate from ChatGPT account state. Use the selected browser's
-process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
+Chromium browser/profile separate from ChatGPT account state. `search` is the macOS-only
+WebKit browser Search (github.com/caisergan/Search), which loads the unpacked companion through
+its own Chrome-extension engine; it takes URLs only via `open -a`, is detected by its bundle
+path, and refuses `chrome.debugger`, so focus-emulation leases and Desktop browser tools are
+unavailable there. Use the selected browser's process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
 OS wake launches require positive process absence and coalesce within one absence episode.
 The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
 

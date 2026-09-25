@@ -1101,6 +1101,8 @@ function apply(next: AppState): void {
     previousState?.config.ui.privacyScreenshots
   );
   $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true);
+  // Search is a macOS-only WebKit browser; a saved choice stays visible so it can be changed.
+  $<HTMLOptionElement>('chatBrowserSearch').hidden = next.platform?.family !== 'macos' && next.config.ui.chatBrowser !== 'search';
   if (next.platform?.family === 'macos') {
     ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use the connector. It stays available from the menu bar and Dock when you close the window."));
     ui($('minimizeToTrayCopy'), 'textContent', () => t("Hide the window to the menu bar when closed"));

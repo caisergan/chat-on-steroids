@@ -19,9 +19,12 @@ export async function isPreferredBrowserRunning(
   try {
     if (platform !== 'win32') {
       if (platform !== 'darwin' && platform !== 'linux') return null;
+      if (browser === 'search' && platform !== 'darwin') return null;
       // comm contains executable names, never arguments or browsing/profile data.
       const result = await command('ps', ['-A', '-o', 'comm='], os.tmpdir(), 5000);
       if (result.timedOut || result.truncated || result.exitCode !== 0 || !result.stdout.trim()) return null;
+      // Search's executable is the generic name "Search"; match its bundle path, not the basename.
+      if (browser === 'search') return result.stdout.split('\n').some(name => /\/Search\.app\/Contents\/MacOS\/Search$/.test(name.trim()));
       const family = browser === 'edge'
         ? /^(?:msedge|microsoft-edge(?:-(?:stable|beta|dev))?|Microsoft Edge(?: Beta| Dev| Canary)?(?: Helper.*)?)$/i
         : browser === 'brave'
@@ -39,6 +42,7 @@ export async function isPreferredBrowserRunning(
         return !/ --(?:headless|enable-automation)(?:[=\s]|$)/.test(line);
       });
     }
+    if (browser === 'search') return null;
     // Probe only the selected family; another browser cannot prove its presence or absence.
     // Enumerate names only, never user command lines or profile data. Both names are constants.
     const processName = browser === 'edge' ? 'msedge' : browser === 'brave' ? 'brave' : 'chrome';
@@ -92,6 +96,14 @@ export function preferredBrowserCandidates(
   home = env.HOME ?? env.USERPROFILE ?? os.homedir(),
   browser: ChatBrowser = 'chrome'
 ): string[] {
+  // Search (github.com/caisergan/Search) is a macOS WebKit browser that runs the companion
+  // through its own Chrome-extension engine. It has no Windows or Linux build.
+  if (browser === 'search') {
+    if (platform !== 'darwin') return [];
+    return ['/Applications', ...(home ? [path.posix.join(home, 'Applications')] : [])]
+      .map(root => path.posix.join(root, 'Search.app', 'Contents', 'MacOS', 'Search'));
+  }
+
   if (platform === 'win32') {
     const p = path.win32;
     const parts = browser === 'edge'
@@ -226,7 +238,7 @@ export async function openInPreferredBrowser(
   const usable = options.usable ?? ((candidate: string) => isExecutableBrowser(candidate, platform));
   const launch = options.launch ?? launchCommand;
   const selected = options.browser ?? getConfig().ui.chatBrowser ?? 'chrome';
-  const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : 'Google Chrome / Chromium';
+  const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : selected === 'search' ? 'Search' : 'Google Chrome / Chromium';
   const bounds = browserWindowBounds();
   // These switches only affect a newly started Chrome process; handing a URL to an
   // existing instance cannot change its policy. Memory Saver exclusions alone do not
@@ -245,7 +257,12 @@ export async function openInPreferredBrowser(
       // persistent background app. Launch the marked helper itself so its tab
       // owns browser lifetime; the extension adopts that same tab, never a second.
       const cwd = (platform === 'win32' ? path.win32 : path.posix).dirname(browser);
-      if (options.backgroundStartup && platform === 'win32') {
+      if (selected === 'search') {
+        // Search takes URLs only through LaunchServices open events, never argv, and has no
+        // Chromium switches. -g keeps a background startup from activating it.
+        await launch('/usr/bin/open', [...(options.backgroundStartup ? ['-g'] : []), '-a', browser.replace(/\/Contents\/MacOS\/[^/]+$/, ''), url], cwd);
+      }
+      else if (options.backgroundStartup && platform === 'win32') {
         // Start-Process joins ArgumentList; supply one correctly quoted Windows
         // command line. PowerShell literals are a separate escaping boundary.
         const literal = (value: string): string => `'${value.replace(/'/g, "''")}'`;
