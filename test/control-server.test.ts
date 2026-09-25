@@ -25,6 +25,7 @@ vi.mock('../src/main/bridge', () => ({
   stopSessionTurn: vi.fn()
 }));
 vi.mock('../src/main/logger', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
+vi.mock('../src/main/chat-models', () => ({ getChatModels: () => ({ state: 'ready', requestedAt: 1, observedAt: 2, models: [{ id: 'gpt-5-6', label: 'GPT-5.6', efforts: ['low', 'high'], aliases: ['x'] }] }) }));
 vi.mock('../src/main/projects', () => ({ listProjects: async () => [{ id: '11111111-1111-4111-8111-111111111111', name: 'Paseo', path: '/p' }] }));
 vi.mock('../src/main/session/store', () => store);
 vi.mock('../src/main/session/input', () => ({ listInputs }));
@@ -141,5 +142,45 @@ describe('task list and activity', () => {
       { origin: 2, seq: 3, kind: 'thinking', text: 'Reading files' },
       { origin: 4, seq: 4, kind: 'tool', text: 'Read a.ts' }
     ]);
+  });
+});
+
+describe('orchestration routes', () => {
+  const text = (t: string) => ({ text: t, truncated: false, chars: t.length });
+  const row = (id: string, over: Record<string, unknown> = {}) => ({ id, state: 'sent', sessionId: 's1abcdef', purpose: 'user', text: 't', mode: 'auto', createdAt: 1, ...over });
+
+  it('lists the account models without internal aliases', async () => {
+    expect((await request('GET', 'models', token())).json).toEqual({ state: 'ready', observedAt: 2, models: [{ id: 'gpt-5-6', label: 'GPT-5.6', efforts: ['low', 'high'] }] });
+  });
+
+  it('keeps only unsettled tasks when asked for active ones', async () => {
+    const t = Date.now();
+    listInputs.mockResolvedValue([
+      row('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+      row('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { state: 'queued', sessionId: null }),
+      row('cccccccc-cccc-4ccc-8ccc-cccccccccccc', { state: 'cancelled' })
+    ]);
+    store.getSession.mockResolvedValue({ id: 's1abcdef' });
+    store.readRecentEvents.mockResolvedValue([
+      { seq: 1, time: t, kind: 'user_message', message: text('t'), inputId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+      { seq: 2, time: t, kind: 'turn_end', outcome: 'completed' }
+    ]);
+    const { json } = await request('GET', 'tasks?active=1', token());
+    expect(json.map((r: any) => r.taskId)).toEqual(['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
+  });
+
+  it('steers a running turn through the outbox injection path', async () => {
+    store.getSession.mockResolvedValue({ id: 's1abcdef', projectId: '11111111-1111-4111-8111-111111111111' });
+    const res = await request('POST', 'sessions/s1abcdef/steer', token(), { text: ' focus on tests ' });
+    expect(res.status).toBe(200);
+    expect(sendDesktopInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's1abcdef', text: 'focus on tests', delivery: 'tool', mode: 'auto', projectId: '11111111-1111-4111-8111-111111111111' }));
+  });
+
+  it('explains how to follow up when the chat has no turn to steer', async () => {
+    store.getSession.mockResolvedValue({ id: 's1abcdef' });
+    sendDesktopInput.mockRejectedValueOnce(new Error('Inject up to 10 images into an active chat; otherwise use Send or After this turn'));
+    const res = await request('POST', 'sessions/s1abcdef/steer', token(), { text: 'x' });
+    expect(res.status).toBe(409);
+    expect(res.json.error.message).toContain('cos task --session s1abcdef');
   });
 });

@@ -22,6 +22,7 @@ import { getStatus } from './connection.js';
 import { bridgeStatus, sessionControlsFor, stopSessionTurn } from './bridge.js';
 import { logInfo, logWarn } from './logger.js';
 import { listProjects } from './projects.js';
+import { getChatModels } from './chat-models.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
 import type { InputEntry } from './session/input.js';
 import type { SessionEvent } from '../shared/session.js';
@@ -30,6 +31,7 @@ import { listInputs } from './session/input.js';
 import { cancelDesktopInput, ready, sendDesktopInput } from './session/start-input.js';
 import {
   CONTROL_PROTOCOL,
+  TERMINAL_TASK_STATES,
   deriveTask,
   taskTurnEvents,
   turnActivity,
@@ -181,13 +183,15 @@ async function dispatch(method: string, parts: string[], query: URLSearchParams,
   if (method === 'POST' && head === 'connect' && !id) return connectNow();
   if (method === 'GET' && head === 'projects' && !id) return (await listProjects()).map(({ id: projectId, name, path: folder }) => ({ id: projectId, name, path: folder }));
   if (method === 'POST' && head === 'tasks' && !id) return createTask(await readJson(req));
-  if (method === 'GET' && head === 'tasks' && !id) return listTasks(Number(query.get('limit')) || 20);
+  if (method === 'GET' && head === 'tasks' && !id) return listTasks(Number(query.get('limit')) || 20, query.get('active') === '1');
+  if (method === 'GET' && head === 'models' && !id) return listModels();
   if (head === 'tasks' && id && !action && method === 'GET') return taskView(taskId(id));
   if (head === 'tasks' && id && action === 'activity' && method === 'GET') return taskActivity(taskId(id));
   if (head === 'tasks' && id && action === 'cancel' && method === 'POST') return { cancelled: await cancelDesktopInput(taskId(id)) };
   if (method === 'GET' && head === 'sessions' && !id) return listSessions(Number(query.get('limit')) || 20);
   if (head === 'sessions' && id && action === 'read' && method === 'GET') return readSession(sessionId(id), Number(query.get('last')) || 6);
   if (head === 'sessions' && id && action === 'stop' && method === 'POST') return stopSession(sessionId(id));
+  if (head === 'sessions' && id && action === 'steer' && method === 'POST') return steerSession(sessionId(id), await readJson(req));
   throw new ControlHttpError(404, 'not_found', 'Unknown endpoint');
 }
 
@@ -304,8 +308,11 @@ async function taskView(id: string): Promise<TaskView> {
 
 interface TaskListItem { taskId: string; sessionId: string | null; state: TaskState; project: string | null; createdAt: number; text: string }
 
-async function listTasks(limit: number): Promise<TaskListItem[]> {
-  const rows = (await listTaskRows()).slice(0, Math.min(Math.max(limit, 1), 60));
+/** `active` keeps only work that has not settled, for an orchestrator checking what is in flight. */
+async function listTasks(limit: number, active = false): Promise<TaskListItem[]> {
+  const cap = Math.min(Math.max(limit, 1), 60);
+  // Settled outbox rows can never become active again, so skip them before reading any history.
+  const rows = (await listTaskRows()).filter(row => !active || (row.state !== 'cancelled' && row.state !== 'failed')).slice(0, active ? 60 : cap);
   const projects = new Map((await listProjects()).map(project => [project.id, project.name]));
   return Promise.all(rows.map(async entry => {
     const session = entry.sessionId ?? entry.deliveredSessionId ?? null;
@@ -318,7 +325,38 @@ async function listTasks(limit: number): Promise<TaskListItem[]> {
     return { taskId: entry.id, sessionId: session, state,
       project: entry.projectId ? projects.get(entry.projectId) ?? null : null, createdAt: entry.createdAt,
       text: oneLine.length > 80 ? `${oneLine.slice(0, 79)}…` : oneLine };
-  }));
+  })).then(items => active ? items.filter(item => !TERMINAL_TASK_STATES.includes(item.state)).slice(0, cap) : items);
+}
+
+/** The account's model picker as last observed; ids are what `task --model` accepts. */
+function listModels() {
+  const catalog = getChatModels();
+  return { state: catalog.state, observedAt: catalog.observedAt, models: catalog.models.map(({ id, label, efforts }) => ({ id, label, efforts })) };
+}
+
+/**
+ * Puts a message into a chat's *running* turn, the composer's "Inject now": it reaches ChatGPT in
+ * that turn's next tool result instead of waiting for the turn to end or interrupting it.
+ */
+async function steerSession(id: string, body: unknown): Promise<{ taskId: string; sessionId: string }> {
+  const { text } = z.object({ text: z.string().trim().min(1, 'Steering text is empty') }).strict().parse(body);
+  const reason = await notReadyReason();
+  if (reason) throw new ControlHttpError(409, 'not_ready', reason);
+  const session = await getSession(id);
+  if (!session) throw new ControlHttpError(404, 'not_found', 'No such session');
+  try {
+    const entry = await sendDesktopInput({
+      id: crypto.randomUUID(), sessionId: id, projectId: session.projectId ?? null, text,
+      mode: 'auto', delivery: 'tool', dueAt: Date.now(), model: null, reasoningEffort: null
+    });
+    return { taskId: entry.id, sessionId: id };
+  } catch (error) {
+    // The outbox refuses injection unless this exact chat has a turn that can take it.
+    if (error instanceof Error && /^Inject/.test(error.message)) {
+      throw new ControlHttpError(409, 'failed', `That chat has no running turn that can take a message now. Send a follow-up instead: cos task --session ${id} "…"`);
+    }
+    throw error;
+  }
 }
 
 async function taskActivity(id: string): Promise<{ task: TaskView; activity: ActivityItem[] }> {
