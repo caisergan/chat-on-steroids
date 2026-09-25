@@ -4,10 +4,11 @@
  * Talks to the app's local control endpoint (`main/control.ts`) and nothing else: it starts no
  * browser, reads no session files and holds no state, so what it reports is exactly what the app
  * shows. Node built-ins only, so it runs on the app's bundled Node with nothing to install.
- * `cos mcp` serves the same operations as MCP tools.
+ * `cos mcp` serves the same operations as MCP tools and `cos hook` answers Claude Code hooks.
  */
 import { EXIT, type ActivityItem, type TaskState, type TaskView } from '../shared/control.js';
 import { CliError, UUID, call, exitForTask, locate, pollTask, pollTasks, runDoctor, type Endpoint, type Waited } from './client.js';
+import { runHook } from './hooks.js';
 import { runMcp } from './mcp.js';
 
 const USAGE = `cos — send work to ChatGPT through the Chat On Steroids app
@@ -29,6 +30,7 @@ Usage:
   cos models                     Models and reasoning efforts this ChatGPT account offers
   cos doctor                     Connect and check every step between this shell and ChatGPT
   cos mcp                        Serve these operations as MCP tools over stdio
+  cos hook EVENT                 Answer a Claude Code hook (session-start, guard, track, notify, stop)
 
 Options:
   --json      Print one JSON document on stdout instead of text
@@ -129,6 +131,7 @@ async function sendAndMaybeWait(endpoint: Endpoint, args: Args, out: Out, create
 async function run(argv: string[], out: Out): Promise<number> {
   const [command, ...rest] = argv;
   if (command === 'mcp') return runMcp();
+  if (command === 'hook') return runHook(rest[0] ?? '');
   const args = parseArgs(rest);
   if (!command || command === 'help' || command === '--help' || command === '-h' || args.flags.has('help')) { process.stdout.write(`${USAGE}\n`); return command ? EXIT.ok : EXIT.usage; }
   const allowed = COMMAND_FLAGS[command];
