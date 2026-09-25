@@ -7,7 +7,8 @@ export default defineConfig({
     // rather than being inlined by the bundler.
     plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: { input: resolve(__dirname, 'src/main/index.ts') }
+      // `cos` is a separate entry: it runs under plain Node against the app's control endpoint.
+      rollupOptions: { input: { index: resolve(__dirname, 'src/main/index.ts'), cos: resolve(__dirname, 'src/cli/cos.ts') } }
     }
   },
   preload: {
