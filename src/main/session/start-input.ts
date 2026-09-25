@@ -9,7 +9,8 @@ function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
   const marker = `cos-input=${encodeURIComponent(entry.id)}`;
   return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true);
 }
-async function ready(signal?: AbortSignal): Promise<void> {
+/** Connector and browser bridge up, or a readable reason why not. Shared with the `cos` endpoint. */
+export async function ready(signal?: AbortSignal): Promise<void> {
   await connect();
   signal?.throwIfAborted();
   // startTunnel returns a lifecycle handle before OpenAI /readyz or cloudflared's URL.
