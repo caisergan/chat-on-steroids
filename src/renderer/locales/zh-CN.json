@@ -1393,5 +1393,6 @@
   "Terminal height": "终端高度",
   "Open a terminal in this project": "在此项目中打开终端",
   "Select a project to open a terminal": "选择一个项目以打开终端",
-  "Terminal input is busy. Try a smaller paste.": "终端输入繁忙，请减少粘贴的文本。"
+  "Terminal input is busy. Try a smaller paste.": "终端输入繁忙，请减少粘贴的文本。",
+  "Waiting for the current turn: ChatGPT has shown no activity for {0} min but still reports it as running.": "正在等待当前轮次：ChatGPT 已 {0} 分钟没有活动，但仍报告其正在运行。"
 }

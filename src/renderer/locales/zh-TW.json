@@ -1427,5 +1427,6 @@
   "Terminal height": "終端機高度",
   "Open a terminal in this project": "在此專案中開啟終端機",
   "Select a project to open a terminal": "選擇一個專案以開啟終端機",
-  "Terminal input is busy. Try a smaller paste.": "終端機輸入忙碌，請減少貼上的文字。"
+  "Terminal input is busy. Try a smaller paste.": "終端機輸入忙碌，請減少貼上的文字。",
+  "Waiting for the current turn: ChatGPT has shown no activity for {0} min but still reports it as running.": "正在等待目前回合：ChatGPT 已 {0} 分鐘沒有活動，但仍回報其正在執行。"
 }

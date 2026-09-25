@@ -1766,6 +1766,19 @@ function hasLaterModelActivity(time: number): boolean {
   return events.some(event => event.time > time && ['assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message'].includes(event.kind));
 }
 
+/** ChatGPT can keep reporting a turn as running (for example while it holds a response for
+ * review) long after its last model or tool activity. A message queued behind that turn would
+ * wait silently; say why and offer the existing Stop instead. Presentation only. */
+const STALLED_TURN_MS = 10 * 60_000;
+function stalledTurnMinutes(entry: InputEntry): number | null {
+  if (entry.state !== 'queued' || !selectedId || (entry.sessionId ?? entry.deliveredSessionId) !== selectedId ||
+      controlledSessionId !== selectedId || !controlledTurnId || controlledStopPending) return null;
+  const active = ['assistant_message', 'native_image', 'tool_call', 'page_tool', 'agent_message', 'turn_start', 'user_message'];
+  const last = Math.max(0, ...events.filter(event => active.includes(event.kind)).map(event => event.time));
+  const idle = Date.now() - last;
+  return last > 0 && idle >= STALLED_TURN_MS ? Math.floor(idle / 60_000) : null;
+}
+
 function paintInputReceipt(row: HTMLElement, item: ReturnType<typeof timelineItems>[number]): void {
   if (item.kind !== 'event' || item.event.kind !== 'user_message') return;
   const receipt = row.querySelector<HTMLElement>('.input-receipt');
@@ -3426,6 +3439,18 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   else receipt.append(icon(['sent', 'tool'].includes(entry.state) ? 'i-check' : 'i-clock'));
   receipt.hidden = !entry.error && ['sent', 'tool'].includes(entry.state) && hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt);
   row.append(receipt);
+  const stalled = stalledTurnMinutes(entry);
+  if (stalled !== null) {
+    const notice = el('div', 'pending-message-stall');
+    const text = el('span', 'pending-message-stall-text');
+    ui(text, 'textContent', () => t("Waiting for the current turn: ChatGPT has shown no activity for {0} min but still reports it as running.", [String(stalled)]));
+    const stop = el('button', 'btn pending-message-stall-stop') as HTMLButtonElement;
+    stop.type = 'button';
+    ui(stop, 'textContent', () => t("Stop turn"));
+    stop.onclick = () => { stop.disabled = true; void stopCurrentTurn(); };
+    notice.append(text, stop);
+    row.append(notice);
+  }
   if (notice) {
     const dismiss = dockAction(() => t("Dismiss delivery notice"), 'i-x', () => {});
     dismiss.onclick = async () => {
@@ -3490,6 +3515,8 @@ async function adoptAcceptedOpening(entry: InputEntry): Promise<boolean> {
   inputDrafts.delete(from); imageDrafts.delete(from); newChatTasks.delete(from);
   return true;
 }
+// Stall minutes advance without any queue or history event; repaint only that local view.
+setInterval(() => { if (controlledTurnId && pendingComposerInputs.some(entry => entry.state === 'queued')) paintPendingInputs(); }, 60_000);
 function paintPendingInputs(): void {
   const all = pendingComposerInputs;
   const belongsToSelection = (entry: InputEntry): boolean => selectedId === null
@@ -3518,7 +3545,7 @@ function paintPendingInputs(): void {
   const next = rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => {
     const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, notice(entry), entry.stagesApplied,
       entry.stages, entry.attachments?.map(file => file.id), entry.images?.map(image => [image.name, image.dataUrl.length]),
-      hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt)]);
+      hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt), stalledTurnMinutes(entry)]);
     const old = previous.get(entry.id);
     if (old?.dataset.inputSignature === sig) return old;
     const row = inputMessageRow(entry, notice(entry)); row.dataset.inputSignature = sig; return row;

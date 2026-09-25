@@ -1429,5 +1429,6 @@
   "Illustrative example. ChatGPT’s appearance may vary.": "説明用の例です。ChatGPT の表示は異なる場合があります。",
   "Illustrative ChatGPT tool approval showing Deny, Allow once, and Always allow": "Deny、Allow once、Always allow を表示した ChatGPT のツール承認画面の例",
   "Files were not added because the draft changed.": "下書きが変更されたため、ファイルを追加しませんでした。",
-  "Reached": "到達"
+  "Reached": "到達",
+  "Waiting for the current turn: ChatGPT has shown no activity for {0} min but still reports it as running.": "現在のターンを待機中: ChatGPT は {0} 分間動きがありませんが、まだ実行中と報告しています。"
 }
