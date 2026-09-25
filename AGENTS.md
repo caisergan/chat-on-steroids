@@ -238,6 +238,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
+| CLI control | `src/main/control.ts`, `src/shared/control.ts`, `src/cli/cos.ts`, `integrations/claude-code/*`: local `cos` endpoint, task-state derivation and the Node-only CLI. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
 
 ### One durable fact, one authoritative owner
@@ -3075,6 +3076,50 @@ browser-chord policy prevents tab/window management through forbidden input chor
 focus chords support authorized navigation, like clicking or setting that same native control;
 it is not a general browser automation fallback. Capture/privacy settings and platform permission
 failures remain explicit, with no Linux/helper fallback that bypasses the capability model.
+
+### Local CLI (`cos`)
+
+**Intent:** a terminal or agent can hand work to ChatGPT through the same outbox the composer uses,
+and read back exactly what the app shows. The CLI owns no state.
+
+`control.ts` serves HTTP on a Unix socket (named pipe on Windows) inside userData/`control/`, only
+while `ui.cliControl` is on (default off). `applyControlSetting` follows Settings saves and
+`shutdownControl` runs in the first shutdown phase; both go through one serialized transition chain,
+so quick saves cannot open two listeners and shutdown cannot be undone by a pending start. A fresh
+random token is written to a `0600` file at each enable and every request needs it; `control.json`
+names the endpoint. There is no TCP listener. Operations reuse existing owners: `sendDesktopInput`
+(new chat = `auto` opening, follow-up in `--session` = `after-turn`, never an interruption),
+`listInputs`, the session store, `stopSessionTurn`, `cancelDesktopInput`. A task id is the outbox
+input id; a new chat's session id is the same value. `task` is refused only when the browser is not
+paired. The connector is not required: the browser sends and records without it, so a failure is a
+`cos doctor` warning (only file/tool work in the chat needs it). `doctor` first brings the connector
+up through `POST /v1/connect`, which reuses the send path's `start-input.ts::ready`; `status` stays
+read-only. Other unreadiness queues durably and is reported per task.
+
+Task state is derived on every read by `shared/control.ts::deriveTask` from the outbox row, the
+recorded events between the exact `user_message` (matched by `inputId`/`messageId`) and the next
+question, plus the live controlled turn (`sessionControlsFor`, never the persisted start alone):
+queued, sending, working, stalled (a running turn with no recorded activity for `STALLED_TURN_MS`,
+the same ten minutes as the queue notice), done (`result` is the last final reply before that turn's
+last `turn_end`, read in full from its overflow asset when capped), failed, cancelled. Fresh work
+after an end (the Thinking-failed case) keeps the task working. `cos wait` polls; the app never
+holds waiters, and a timed-out wait prints the task (`timedOut`) with exit 6. Flags are checked per
+command so a typo cannot become task text. An unfinished send with no progress for `STALLED_TURN_MS`
+is `stalled` whether or not the app still tracks the turn as live, so `wait`/`follow` stop instead
+of polling the whole timeout.
+
+`cos tasks` (alias `ps`) lists a person's recent sends with their derived state; it reads one
+shallow pass of facts per row and skips the live-turn lookup, so it can only under-report `stalled`
+as `working`, which the per-task views still resolve. `cos follow`/`--follow` streams the turn's
+activity: `shared/control.ts::activityLine` renders each `progress` (thinking), `page_tool`
+(browsing), `tool_call` and `chat_error` event, and `turnActivity` collapses a caption that grows in
+place to one line carrying its latest text at its first-seen position, so the client dedupes by
+`origin` with no cursor protocol. Exit codes (`EXIT`) are append-only. `cos` (`src/cli/cos.ts`,
+built as `out/main/cos.js`) imports only Node built-ins and `shared/control.ts`. Its userData lookup
+mirrors Electron's; `COS_USER_DATA` overrides it. The Claude Code skill is
+`integrations/claude-code/delegate-to-chatgpt`. Settings → Browser & history → **CLI access** is the
+switch. Not yet built: `cos mcp` and an installer shim that puts `cos` on PATH (development runs
+`node out/main/cos.js`).
 
 ## 19. Debugging, tests and working here
 
