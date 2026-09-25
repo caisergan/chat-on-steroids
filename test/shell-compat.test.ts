@@ -372,6 +372,19 @@ it('holds provisional shell request metadata until this document owns the native
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 });
 
+it('finds live shell request ids in the observed large compiler memo cache', async () => {
+  // Work-mode owner shape from a live page: 443 hooks and 41 memo slots, snapshot in the first.
+  const f = fixture(), { owner, snapshot } = liveShellMapping(f, true);
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => ({ slot: i }));
+  owner.updateQueue.memoCache.data = [[...filler(444), snapshot], ...Array.from({ length: 40 }, () => filler(4))];
+  let hook: any = null;
+  for (let at = 0; at < 443; at++) hook = { memoizedState: { slot: at }, next: hook };
+  owner.memoizedState = hook;
+  const turn = (await f.ask()).turns[0];
+  expect(turn.calls[0]).toMatchObject({ messageId: CALL, requestId: OTHER });
+  expect(turn.requests.map((request: any) => request.requestId)).toContain(OTHER);
+});
+
 it.each(['live', 'history', 'wrong-recipient', 'unselected', 'duplicate'])
   ('reads the mounted native Code Mode invocation metadata without its result body (%s)', async state => {
     const f = fixture(), { mapping } = liveShellMapping(f, true);

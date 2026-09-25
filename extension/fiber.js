@@ -1540,7 +1540,10 @@
       if (prior && prior.renderedConversation.current_node !== conversation.current_node) conflict = true;
       snapshots.set(mapping, candidate);
     };
-    let remaining = 2048;
+    // Observed 2026-09-25 (Work shell): the owner holds 443 hooks and a 41-slot compiler
+    // memo cache whose first slot carries this snapshot. The former 32-slot/2048-read caps
+    // skipped it, so every connector call in a running turn lost its request id.
+    let remaining = 8192;
     for (let at = fiber, up = 0; at && up < MAX_CLIMB && remaining > 0; up++, at = at.return) {
       if (at.memoizedProps?.conversationId !== entry.conversationId) continue;
       for (let hook = at.memoizedState; hook && remaining-- > 0; hook = hook.next) {
@@ -1548,7 +1551,7 @@
         inspect(state); if (Array.isArray(state)) inspect(state[0]);
       }
       const data = at.updateQueue?.memoCache?.data;
-      if (!Array.isArray(data) || data.length > 32) continue;
+      if (!Array.isArray(data) || data.length > 256) continue;
       for (const row of data) {
         if (!Array.isArray(row) || row.length > 1024) continue;
         for (const item of row) { if (--remaining < 0) break; inspect(item); }
