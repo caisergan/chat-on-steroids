@@ -159,9 +159,10 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
 function bundledDir(): string | null {
   const packaged = process.resourcesPath ? path.join(process.resourcesPath, 'tunnel') : null;
   if (packaged && existsSync(packaged)) return packaged;
-  // Source: src/main/tunnel -> repo root is three levels up.
-  // Packaged/compiled dev output keeps the same main/tunnel nesting under dist.
-  const dev = path.resolve(__dirname, '..', '..', '..', 'resources', 'tunnel');
+  // Development runs the bundled out/main/index.js, so the repo root is two levels up
+  // (the same as ripgrep.ts). Three levels reached the folder *above* the checkout, so
+  // `npm run dev` never found the client `npm run tunnel` had placed in resources/tunnel.
+  const dev = path.resolve(__dirname, '..', '..', 'resources', 'tunnel');
   return existsSync(dev) ? dev : null;
 }
 
