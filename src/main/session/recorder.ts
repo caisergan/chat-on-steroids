@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
-import { userTitle } from './title.js';
+import { isFrameTitle, userTitle } from './title.js';
 import type {
   ActivitySummary,
   AgentMessage,
@@ -1910,7 +1910,7 @@ function observedUserTitle(first?: string): string | undefined {
 }
 
 function observationTitle(observations: readonly ChatObservation[]): string | undefined {
-  const title = observations.find((item) => item.kind === 'conversation_title')?.text?.trim();
+  const title = observations.find((item) => item.kind === 'conversation_title' && !isFrameTitle(item.text))?.text?.trim();
   const first = observations.find((item) => item.kind === 'user_message')?.text;
   return title || observedUserTitle(first);
 }
@@ -2079,7 +2079,7 @@ async function recordChatObservationsNow(
   // an intermediate array for every batch).
   for (const item of observations) {
     if (!firstUser && item.kind === 'user_message') firstUser = item;
-    if (item.kind === 'conversation_title') pageTitle = item;
+    if (item.kind === 'conversation_title' && !isFrameTitle(item.text)) pageTitle = item;
     if (item.kind === 'turn_start' && item.turnId) batchTurnStarts.set(item.turnId, item.time);
     if (item.kind === 'turn_end' && item.turnId) {
       explicitEnds.add(item.turnId);

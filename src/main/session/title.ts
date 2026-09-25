@@ -3,6 +3,11 @@ import { userPromptText } from '../../shared/user-prompt.js';
 
 const contextPrefix = /^\s*(?:\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\]\s*)?\[\[COS_CONTEXT:\d{1,6}\]\]/;
 
+/** The 2026-09 shell names an untitled tab after its first message; the app's own frame is never a title. */
+export function isFrameTitle(text: string | undefined): boolean {
+  return !!text && /^\s*\\?\[\\?\[(?:COS\\?_CONTEXT|CLF-)/.test(text);
+}
+
 /** Presentation only: never reinterpret a damaged frame as delivery/receipt evidence. */
 export function userTitle(text: string, authoredText?: string): string {
   const authored = authoredText ?? userPromptText(text);
