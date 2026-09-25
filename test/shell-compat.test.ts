@@ -684,6 +684,28 @@ it('delivers three successive shell inputs with exact receipts and completed ans
   expect(r.events().filter((e: any) => e.kind === 'turn_end' && e.outcome === 'completed')).toHaveLength(3);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 15000);
+it('acknowledges an input that ChatGPT stored as escaped Markdown because it contains a relative link', async () => {
+  // 2026-09-25: `tools[name](args)` / `[a](b)` switch the native message to renderMarkdown.
+  const markdownReadback = (value: string) => value.replace(/[\\`*_#[\]()!]/g, '\\$&')
+    .replace(/ +$/gm, match => '&#x20;'.repeat(match.length)).replace(/\n/g, '\\\n');
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let latest: ReturnType<typeof addExchange> | undefined;
+  const text = '# Plan\nCall tools[name](args) and see [notes](docs/notes.md).  \nKeep C:\\work **literal**.';
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); latest = addExchange(f, 1, markdownReadback(edit.serialize())); edit.box.replaceChildren();
+  });
+  const offered = { id: '88888888-1111-4111-8111-000000000009', owner: 'owner-md', text,
+    model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
+  const r = await recorder(f, { desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input: offered } }) });
+  const pending = r.runtime({ type: 'clf-desktop-input', id: offered.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(latest).toBeDefined(), { timeout: 5000 });
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(await pending).toEqual({ ok: true });
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.ack && m.id === offered.id)).toHaveLength(1);
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 15000);
 it.each([false, true])('bootstraps a shell worker with literal instructions and the exact native conversation (cold=%s)', async cold => {
   const f = fixture(), edit = editing(f), commandId = 'shell-worker-command';
   const options = f.props.modelListConfig;
