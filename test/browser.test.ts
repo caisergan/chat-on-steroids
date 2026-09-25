@@ -270,6 +270,19 @@ describe('browser-backed ChatGPT commands', () => {
     }]);
   });
 
+  it.each([true, false])('starts macOS Chrome without activating it only for background chats (background=%s)', async backgroundStartup => {
+    const browser = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    const url = 'https://chatgpt.com/?cos-input=example#cos-input=example';
+    await openInPreferredBrowser(url, { platform: 'darwin', backgroundStartup, usable: candidate => candidate === browser,
+      launch: async (command, args) => { calls.push({ command, args }); return { pid: 1 }; } });
+    expect(calls).toHaveLength(1);
+    if (!backgroundStartup) { expect(calls[0]).toEqual({ command: browser, args: [url] }); return; }
+    expect(calls[0]!.command).toBe('/usr/bin/open');
+    expect(calls[0]!.args.slice(0, 4)).toEqual(['-g', '-a', '/Applications/Google Chrome.app', '--args']);
+    expect(calls[0]!.args.at(-1)).toBe(url);
+  });
+
   it('passes only the orchestration URL to a Linux browser, never the AppImage sandbox fallback', async () => {
     const flatpakChrome = '/var/lib/flatpak/exports/bin/com.google.Chrome';
     const calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];

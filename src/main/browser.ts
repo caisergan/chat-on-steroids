@@ -258,6 +258,11 @@ export async function openInPreferredBrowser(
         const result = await (options.powershell ?? runPowerShell)(script, cwd, 10_000);
         if (result.timedOut || result.exitCode !== 0) throw new Error(`Background browser launch failed: ${result.stderr.slice(0, 300) || 'PowerShell did not complete'}`);
       }
+      else if (options.backgroundStartup && platform === 'darwin' && /\.app\/Contents\/MacOS\/[^/]+$/.test(browser)) {
+        // Executing the bundle binary always activates it. LaunchServices' -g starts the same
+        // app without bringing it forward; --args reaches only this newly started process.
+        await launch('/usr/bin/open', ['-g', '-a', browser.replace(/\/Contents\/MacOS\/[^/]+$/, ''), '--args', ...args], cwd);
+      }
       else await launch(browser, args, cwd);
       return browser;
     } catch (error) {
