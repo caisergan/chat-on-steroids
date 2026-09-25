@@ -1619,6 +1619,12 @@ export function setCallAttributionListener(
   attributionListener = listen;
 }
 
+let recordedUserMessageListener: ((sessionId: string) => void) | null = null;
+/** Set at startup so the input owner can reconcile an opening whose page receipt was lost. */
+export function setRecordedUserMessageListener(listen: ((sessionId: string) => void) | null): void {
+  recordedUserMessageListener = listen;
+}
+
 /** Set by the agent broker, for the deferred prime binding in recordToolCall. */
 export function setAgentBinder(bind: (agent: string, conversationId: string) => void): void {
   agentBinder = bind;
@@ -2126,6 +2132,9 @@ async function recordChatObservationsNow(
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
+        // Outside this batch: the input owner reads the flushed transcript itself.
+        const listener = recordedUserMessageListener;
+        if (listener) setTimeout(() => listener(sessionId), 0);
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
           activity.working = true;

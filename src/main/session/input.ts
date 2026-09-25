@@ -10,7 +10,7 @@ import { getConfig } from '../config.js';
 import { randomUUID } from 'node:crypto';
 import { userTitle } from './title.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
-import { getSession, findSessionByConversation, createSession, deleteSession, rebindSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall, sessionDirectoryMissing, readCompletedFinal, readLatestUserMessage } from './store.js';
+import { getSession, findSessionByConversation, createSession, deleteSession, rebindSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall, sessionDirectoryMissing, readCompletedFinal, readLatestUserMessage, readEvents } from './store.js';
 import { assignSessionProject, projectWorkspace, getSessionProject } from '../projects.js';
 import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
@@ -1373,6 +1373,49 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
     await publishHistory();
     return true;
   });
+}
+/** Undo only the editor's readback encoding: hard-break/punctuation escapes and entities. */
+function recordedSendText(value: string): string {
+  return value.replace(/&#x20;|&nbsp;/g, ' ').replace(/\\\n/g, '\n')
+    .replace(/\\([!-/:-@[-`{-~])/g, '$1').replace(/\s+/g, '');
+}
+const RECORDED_OPENING_PREFIX = 160;
+const RECORDED_OPENING_SKEW_MS = 5_000;
+/**
+ * The page can lose its own Send receipt (a replaced document, or a composer that rewrote the
+ * submitted text) after ChatGPT accepted a fresh chat. The app then already holds independent
+ * proof: this opening was authorized to Send, bound its exact new conversation, and the recorder
+ * captured that conversation's first authored message afterwards. Only that exact opening is
+ * acknowledged, through the same receipt path the page would have used. Text is a guard on the
+ * frame's leading bytes, never the identity; ordinary follow-ups keep requiring the page ACK.
+ */
+export async function acknowledgeRecordedOpening(sessionId: string): Promise<boolean> {
+  const rows = await listInputs();
+  const candidates = rows.filter(row => row.opening === true && row.state === 'browser' && row.purpose !== 'decision' &&
+    row.sessionId === sessionId && !!row.owner && !!row.conversationId && row.sendAuthorizedAt !== undefined && !row.companionInputId);
+  if (candidates.length !== 1) return false;
+  const row = candidates[0]!;
+  const session = await getSession(sessionId);
+  if (session?.conversationId !== row.conversationId) return false;
+  // The opening's own message is this chat's first authored one; later follow-ups do not prove it.
+  const message = (await readEvents(sessionId, { kinds: ['user_message'] }))
+    .filter((event): event is Extract<typeof event, { kind: 'user_message' }> => event.kind === 'user_message' && !!event.messageId)
+    .sort((a, b) => a.time - b.time)[0];
+  if (!message?.messageId || message.time < row.sendAuthorizedAt! - RECORDED_OPENING_SKEW_MS) return false;
+  const recorded = recordedSendText(message.message?.text ?? '');
+  const expected = recordedSendText(row.deliveryText ?? row.text);
+  const prefix = Math.min(RECORDED_OPENING_PREFIX, expected.length);
+  if (!prefix || recorded.slice(0, prefix) !== expected.slice(0, prefix)) return false;
+  const acknowledged = await acknowledgeBrowserInput(row.id, row.owner!, row.conversationId, message.messageId);
+  if (acknowledged) logInfo(`input ${row.id}: acknowledged from the recorded first message of ${row.conversationId}`);
+  return acknowledged;
+}
+
+/** Startup sweep for openings stranded before this reconciliation existed. */
+export async function acknowledgeRecordedOpenings(): Promise<void> {
+  const sessions = new Set((await listInputs()).filter(row => row.opening === true && row.state === 'browser' &&
+    row.sendAuthorizedAt !== undefined && row.conversationId && row.sessionId).map(row => row.sessionId!));
+  for (const sessionId of sessions) await acknowledgeRecordedOpening(sessionId).catch(() => false);
 }
 /** A later exact call proves receipt of an earlier tool response, never of a queued task. */
 function toolInputReceipt(entry: InputEntry, sessionId: string, conversationId: string, startedAt: number): InputEntry {

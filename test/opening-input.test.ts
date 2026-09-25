@@ -4,9 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, readDurable, writeDurableNow, flushDurable, resetDurableForTests } from '../src/main/durable.js';
-import { initSessionStore, getSession, createSession, findSessionByConversation, listSessions, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { initSessionStore, getSession, createSession, findSessionByConversation, listSessions, resetSessionStoreForTests, upsertMessageEvent } from '../src/main/session/store.js';
 import { enqueueInput, listInputs, pendingBrowserInputs, claimBrowserInput, authorizeBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject,
-  cancelInput, failBrowserInput, resetInputForTests, configureInputDelivery, setInputAutomation, type InputArgs, type InputEntry } from '../src/main/session/input.js';
+  cancelInput, failBrowserInput, resetInputForTests, configureInputDelivery, setInputAutomation, acknowledgeRecordedOpening, acknowledgeRecordedOpenings,
+  type InputArgs, type InputEntry } from '../src/main/session/input.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -162,6 +163,29 @@ it('binds an exact authorized opening before recording and acknowledges only its
   expect(await bindBrowserInputProject(row.id, 'owner', randomUUID())).toBe(false);
   expect(await acknowledgeBrowserInput(row.id, 'owner', conversation, 'native-message')).toBe(true);
   expect((await listInputs())[0]).toMatchObject({ sessionId: row.sessionId, deliveredSessionId: row.sessionId, state: 'sent', opening: true });
+});
+
+it.each(['recorded', 'unauthorized', 'unbound', 'different-text', 'before-send'])('acknowledges a lost-receipt opening only from its recorded first message (%s)', async kind => {
+  // 2026-09-25: the Work shell escaped the sent frame and the page never ACKed a running chat.
+  const text = '[[COS_CONTEXT:41]]\n# Build the port\nKeep **literal** text.  \nThen continue.';
+  const row = await enqueueInput(args({ text }));
+  const conversation = randomUUID();
+  await claimBrowserInput(row.id, 'owner', null, true);
+  if (kind !== 'unauthorized') await authorizeBrowserInput(row.id, 'owner', null);
+  if (kind !== 'unbound' && kind !== 'unauthorized') expect(await bindBrowserInputProject(row.id, 'owner', conversation)).toBe(true);
+  const authorizedAt = (await listInputs())[0]!.sendAuthorizedAt ?? Date.now();
+  const readback = kind === 'different-text' ? '[[COS\\_CONTEXT:41]]\\\nSomething else entirely'
+    : '[[COS\\_CONTEXT:41]]\\\n\\# Build the port\\\nKeep \\*\\*literal\\*\\* text.&#x20;\\\nThen continue.';
+  await upsertMessageEvent(row.sessionId!, { time: kind === 'before-send' ? authorizedAt - 60_000 : authorizedAt + 700,
+    source: 'extension', kind: 'user_message', messageId: 'native-user', message: { text: readback, chars: readback.length, truncated: false } });
+  // A later follow-up must not hide the opening's own first message.
+  await upsertMessageEvent(row.sessionId!, { time: authorizedAt + 90_000, source: 'extension', kind: 'user_message',
+    messageId: 'native-follow-up', message: { text: 'thanks, continue', chars: 16, truncated: false } });
+  const expected = kind === 'recorded';
+  expect(await acknowledgeRecordedOpening(row.sessionId!)).toBe(expected);
+  expect((await listInputs())[0]).toMatchObject(expected ? { state: 'sent', messageId: 'native-user', deliveredSessionId: row.sessionId } : { state: 'browser' });
+  if (expected) await acknowledgeRecordedOpenings(); // Idempotent after the receipt exists.
+  expect((await listInputs())[0]!.state).toBe(expected ? 'sent' : 'browser');
 });
 
 it('rejects another recording collision and never binds a cancelled unauthorized opening', async () => {

@@ -23,8 +23,10 @@ import {
   flushRecorder,
   queueDeterministicAttributionRepair,
   setAgentBinder,
-  setAgentConversationLookup
+  setAgentConversationLookup,
+  setRecordedUserMessageListener
 } from './session/recorder.js';
+import { acknowledgeRecordedOpening, acknowledgeRecordedOpenings } from './session/input.js';
 import {
   agentConversation,
   bindConversation,
@@ -339,6 +341,9 @@ void app.whenReady().then(async () => {
   // The prime's chat is the user's own, so no extension report can name it. It is bound
   // when the recorder manages to place the prime's first call. See recordToolCall.
   setAgentBinder(bindConversation);
+  // A fresh chat whose page lost its Send receipt is reconciled from the recorded message.
+  setRecordedUserMessageListener(sessionId => void acknowledgeRecordedOpening(sessionId).catch(() => false));
+  void acknowledgeRecordedOpenings().catch(() => undefined);
   // Before anything can call an agent tool, and before a run is restored: the broker
   // decides whether a previous run has been abandoned partly from which ChatGPT tabs are
   // open, and without this it can only answer "I cannot see" — which it treats, on
