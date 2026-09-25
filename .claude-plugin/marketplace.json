@@ -1,0 +1,16 @@
+{
+  "name": "chat-on-steroids",
+  "owner": {
+    "name": "Chat On Steroids"
+  },
+  "metadata": {
+    "description": "Claude Code integrations for the Chat On Steroids desktop app."
+  },
+  "plugins": [
+    {
+      "name": "chat-on-steroids",
+      "source": "./integrations/claude-code",
+      "description": "Let Claude orchestrate ChatGPT through the Chat On Steroids desktop app: send and supervise tasks in real ChatGPT chats, steer or stop them, and verify their work."
+    }
+  ]
+}
