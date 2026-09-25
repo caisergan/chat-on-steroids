@@ -248,6 +248,8 @@
   "Brave Browser": "Brave Browser",
   "Background chats": "バックグラウンドのチャット",
   "Keep app-created ChatGPT tabs in the background.": "アプリが作成した ChatGPT タブをバックグラウンドに保ちます。",
+  "CLI access": "CLI アクセス",
+  "Let the cos command on this computer send tasks to ChatGPT and read your chats. Only your user account can connect.": "このコンピューターの cos コマンドが ChatGPT にタスクを送り、チャットを読めるようにします。接続できるのはあなたのユーザーアカウントだけです。",
   "Automatic plugin refresh": "プラグインの自動更新",
   "Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.": "連携用拡張機能が、変更されたコネクターのツールを ChatGPT で更新できるようにします。既定では無効です。ChatGPT での手動更新は引き続き可能です。",
   "Browser only": "既存のブラウザーのみ",

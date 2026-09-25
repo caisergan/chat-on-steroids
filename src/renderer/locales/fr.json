@@ -238,6 +238,8 @@
   "Brave Browser": "Brave Browser",
   "Background chats": "Chats en arrière-plan",
   "Keep app-created ChatGPT tabs in the background.": "Garder les onglets ChatGPT créés par l'application en arrière-plan.",
+  "CLI access": "Accès CLI",
+  "Let the cos command on this computer send tasks to ChatGPT and read your chats. Only your user account can connect.": "Permet à la commande cos de cet ordinateur d'envoyer des tâches à ChatGPT et de lire vos chats. Seul votre compte utilisateur peut s'y connecter.",
   "Automatic plugin refresh": "Actualisation automatique des plugins",
   "Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.": "Laisser le compagnon actualiser les outils modifiés du connecteur dans ChatGPT. Désactivé par défaut ; l'actualisation manuelle reste disponible dans ChatGPT.",
   "Browser only": "Navigateur uniquement",

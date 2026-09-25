@@ -238,6 +238,8 @@
   "Brave Browser": "Brave Browser",
   "Background chats": "Arka plan sohbetleri",
   "Keep app-created ChatGPT tabs in the background.": "Uygulamanın açtığı ChatGPT sekmelerini arka planda tut.",
+  "CLI access": "CLI erişimi",
+  "Let the cos command on this computer send tasks to ChatGPT and read your chats. Only your user account can connect.": "Bu bilgisayardaki cos komutunun ChatGPT'ye görev göndermesine ve sohbetlerini okumasına izin ver. Yalnızca senin kullanıcı hesabın bağlanabilir.",
   "Automatic plugin refresh": "Otomatik eklenti yenileme",
   "Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.": "Yardımcı tarayıcı eklentisi, değişen bağlayıcı araçlarını ChatGPT'de yenilesin. Varsayılan olarak kapalıdır; ChatGPT'de elle yenileme her zaman kullanılabilir.",
   "Browser only": "Yalnızca mevcut tarayıcı sekmeleri",

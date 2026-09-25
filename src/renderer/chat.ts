@@ -3296,7 +3296,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'workerModel', 'workerReasoning', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishLeadMinutes', 'workerModel', 'workerReasoning', 'backgroundChats', 'browserOnly', 'autoRefreshPlugins', 'cliControl',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
