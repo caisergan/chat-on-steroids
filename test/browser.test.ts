@@ -62,6 +62,22 @@ describe('browser-backed ChatGPT commands', () => {
     expect(await isPreferredBrowserRunning('aix', probe)).toBeNull();
     expect(probe).not.toHaveBeenCalled();
   });
+  it('does not count a headless automation Chrome as the user\'s browser', async () => {
+    // 2026-09-25: chrome-devtools-mcp's Puppeteer Chrome made sends wait for a companion forever.
+    const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const automation = `${chrome} --allow-pre-commit-input --enable-automation --headless=new --remote-debugging-pipe --user-data-dir=/tmp/puppeteer_dev_chrome_profile-x`;
+    const helper = '/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/1/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --type=renderer';
+    let args = `${automation}\n${helper}\n`;
+    const probe = vi.fn(async (_command: string, argv: string[]) => ({ stdout: argv[2] === 'comm=' ? `${chrome}\nGoogle Chrome Helper\n` : args,
+      stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 }));
+    expect(await isPreferredBrowserRunning('darwin', undefined, 'chrome', probe as any)).toBe(false);
+    args = `${automation}\n${chrome} --flag-switches-begin\n${helper}\n`;
+    expect(await isPreferredBrowserRunning('darwin', undefined, 'chrome', probe as any)).toBe(true);
+    args = `${chrome}\n`;
+    expect(await isPreferredBrowserRunning('linux', undefined, 'chrome', probe as any)).toBe(true);
+    args = '';
+    expect(await isPreferredBrowserRunning('darwin', undefined, 'chrome', probe as any)).toBeNull();
+  });
   it.each(['darwin', 'linux'] as const)('observes selected process names on %s and fails closed on incomplete probes', async platform => {
     const result = { stdout: '/sbin/init\nps\n/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
     const probe = vi.fn(async () => result);

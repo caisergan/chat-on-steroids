@@ -27,7 +27,17 @@ export async function isPreferredBrowserRunning(
         : browser === 'brave'
           ? /^(?:brave|brave-browser(?:-(?:stable|beta|dev|nightly))?|Brave Browser(?: Beta| Dev| Nightly)?(?: Helper.*)?)$/i
         : /^(?:chrome|google-chrome(?:-(?:stable|beta|unstable))?|chromium(?:-browser)?|Google Chrome(?: Beta| Dev| Canary)?(?: Helper.*)?|Chromium(?: Helper.*)?)$/i;
-      return result.stdout.split('\n').some(name => family.test(path.posix.basename(name.trim())));
+      if (!result.stdout.split('\n').some(name => family.test(path.posix.basename(name.trim())))) return false;
+      // A headless/automation instance (Puppeteer, DevTools MCP) shares the executable name but can
+      // never host the companion. Counting it made sends wait forever instead of launching Chrome.
+      // Only this family's main processes are inspected, for these flags alone; nothing is kept.
+      const detail = await command('ps', ['-A', '-o', 'args='], os.tmpdir(), 5000);
+      if (detail.timedOut || detail.truncated || detail.exitCode !== 0 || !detail.stdout.trim()) return null;
+      return detail.stdout.split('\n').some(line => {
+        const executable = line.trim().split(/\s+--/, 1)[0] ?? '';
+        if (!family.test(path.posix.basename(executable)) || / --type=/.test(line)) return false;
+        return !/ --(?:headless|enable-automation)(?:[=\s]|$)/.test(line);
+      });
     }
     // Probe only the selected family; another browser cannot prove its presence or absence.
     // Enumerate names only, never user command lines or profile data. Both names are constants.
