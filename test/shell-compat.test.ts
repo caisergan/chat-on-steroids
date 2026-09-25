@@ -18,7 +18,7 @@ const OTHER = '55555555-5555-4555-8555-555555555555';
 let page: JSDOM;
 afterEach(() => page?.window.close());
 
-function fixture() {
+function fixture(composerForm = 'data-chatgpt-composer') {
   page = new JSDOM(`<div id="root"><aside id="app-shell-sidebar"></aside><main data-app-shell-main-surface>
     <div data-thread-find-target="conversation"><div data-turn-key="${USER}"><div data-content-search-turn-key="${TURN}">
       <div data-content-search-unit-key="${TURN}:0:user"><div data-user-message-bubble><div class="whitespace-pre-wrap">hello</div></div></div>
@@ -26,7 +26,7 @@ function fixture() {
         <div data-markdown-text-style="assistant-message">Commentary without a provider message id</div></div>
       <div data-content-search-unit-key="${TURN}:2:assistant"><div data-markdown-text-style="assistant-message">Answer</div></div>
     </div></div></div>
-    <form data-chatgpt-composer><div data-composer-body><div contenteditable="true" role="textbox" data-composer-markdown><p><br></p></div>
+    <form ${composerForm}><div data-composer-body><div contenteditable="true" role="textbox" data-composer-markdown><p><br></p></div>
       <button type="button" data-composer-navigation-target="add-context">+</button>
       <button type="button" aria-haspopup="menu" data-codex-intelligence-trigger="true" data-composer-navigation-target="reasoning" data-selected-reasoning-effort="medium">Mittel</button>
       <button type="submit" aria-label="Senden">Senden</button>
@@ -614,6 +614,17 @@ it('preserves prepared multiline text through the shell editor serializer', () =
   expect(edit.serialize()).toBe(value);
   expect(f.doc.execCommand).toHaveBeenCalledOnce();
   expect(edit.box.querySelector('tag')).toBeNull();
+});
+it('accepts the renamed home composer form and its literal-paste editor', () => {
+  // Observed Work-mode home page: the form lost data-chatgpt-composer.
+  const f = fixture('class="relative flex flex-col gap-2" data-composer-placement="home" data-thread-find-composer="true"');
+  const box = f.doc.querySelector('[contenteditable]');
+  expect(f.api.composer()).toBe(box);
+  expect(f.api.composerVisible()).toBe(true);
+  expect(f.api.composerWritable()).toBe(true);
+  const edit = editing(f), value = 'Keep **literal** text\nand C:\\work.';
+  expect(f.api.insertPrompt(value, true)).toBe(true);
+  expect(edit.serialize()).toBe(value);
 });
 it('hides only a verified shell prompt frame and restores a recycled user bubble', async () => {
   const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;

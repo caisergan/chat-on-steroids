@@ -2014,7 +2014,7 @@
   function pickerSnapshot() {
     // The closed native trigger retains the same picker owner. Passive recording
     // must not depend on discovery opening its portal first.
-    const form = document.querySelector('#prompt-textarea, form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]')?.closest('form');
+    const form = document.querySelector('#prompt-textarea, form:is([data-chatgpt-composer], [data-thread-find-composer]) [contenteditable="true"][role="textbox"]')?.closest('form');
     const reported = '[data-codex-intelligence-trigger],[data-composer-navigation-target="reasoning"]';
     const triggers = [...new Set([...(form?.querySelectorAll('button[aria-haspopup="menu"]') || []), ...document.querySelectorAll(reported)])]
       .filter(node => node.matches('button,[role="button"]') && !node.closest(`${OWN_SURFACES},[data-testid^="conversation-turn"],[data-message-author-role],.markdown,[contenteditable],[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&

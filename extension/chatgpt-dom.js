@@ -41,7 +41,9 @@ var CLF_DOM = (() => {
   const STOP =
     'button[data-testid="stop-button"], button[data-testid="composer-stop-button"], ' +
     'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"]';
-  const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i], form[data-chatgpt-composer] button[type="submit"]';
+  // The shell has renamed its composer form (data-chatgpt-composer → data-thread-find-composer).
+  const COMPOSER_FORM = 'form:is([data-chatgpt-composer], [data-thread-find-composer])';
+  const SEND = `button[data-testid="send-button"], form button[aria-label^="Send" i], ${COMPOSER_FORM} button[type="submit"]`;
   /** The composer's own trailing controls, where the send and dictation buttons live. */
   const TRAILING =
     '[data-testid="composer-trailing-actions"], [data-testid="composer-footer-actions"], ' +
@@ -1440,7 +1442,7 @@ var CLF_DOM = (() => {
     return safe(() => {
       const classic = document.querySelector('#prompt-textarea');
       if (classic) return classic;
-      const candidates = [...document.querySelectorAll('form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]')]
+      const candidates = [...document.querySelectorAll(`${COMPOSER_FORM} [contenteditable="true"][role="textbox"]`)]
         .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`));
       return candidates.length === 1 ? candidates[0] : null;
     }, null);
@@ -1902,7 +1904,7 @@ var CLF_DOM = (() => {
       const paragraph = document.createElement('p');
       // @ehkogh/#318: the shell's Markdown serializer otherwise escapes text and
       // hard breaks. Its native literalPaste mark preserves the submitted bytes.
-      const host = box.matches('[data-composer-markdown]') && box.closest('form[data-chatgpt-composer]')
+      const host = box.matches('[data-composer-markdown]') && box.closest(COMPOSER_FORM)
         ? document.createElement('span') : paragraph;
       if (host !== paragraph) {
         host.setAttribute('data-prompt-literal-paste', '');
