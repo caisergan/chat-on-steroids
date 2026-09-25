@@ -7,12 +7,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { afterAll, beforeAll } from 'vitest';
 import { createMcpHandler, TOOLS } from '../src/cli/mcp';
 
-/** A stand-in control endpoint on a real Unix socket, so the real client code runs. */
+/** A stand-in control endpoint on a real Unix socket (a named pipe on Windows), so the real client code runs. */
 const calls: Array<{ method: string; route: string; body?: unknown }> = [];
 let responses: Record<string, unknown> = {};
 let dir: string, socket: string, fake: http.Server;
 beforeAll(async () => {
-  dir = mkdtempSync(path.join(os.tmpdir(), 'cos-mcp-')); socket = path.join(dir, 's');
+  dir = mkdtempSync(path.join(os.tmpdir(), 'cos-mcp-')); socket = process.platform === 'win32' ? `\\\\.\\pipe\\${path.basename(dir)}` : path.join(dir, 's');
   fake = http.createServer((req, res) => {
     let body = ''; req.on('data', c => { body += c; }); req.on('end', () => {
       const route = (req.url ?? '').replace(/^\/v1\//, '');

@@ -3516,7 +3516,8 @@ async function adoptAcceptedOpening(entry: InputEntry): Promise<boolean> {
   return true;
 }
 // Stall minutes advance without any queue or history event; repaint only that local view.
-setInterval(() => { if (controlledTurnId && pendingComposerInputs.some(entry => entry.state === 'queued')) paintPendingInputs(); }, 60_000);
+// A window timer ends with its document, like the renderer's other intervals.
+window.setInterval(() => { if (controlledTurnId && pendingComposerInputs.some(entry => entry.state === 'queued')) paintPendingInputs(); }, 60_000);
 function paintPendingInputs(): void {
   const all = pendingComposerInputs;
   const belongsToSelection = (entry: InputEntry): boolean => selectedId === null

@@ -65,8 +65,9 @@ export const CONTROL_DISCOVERY_FILE = 'control.json';
 export function controlEndpoint(userData: string, platform: NodeJS.Platform = process.platform, uid = process.getuid?.() ?? 0): string {
   const key = crypto.createHash('sha256').update(userData).digest('hex').slice(0, 12);
   if (platform === 'win32') return `\\\\.\\pipe\\chat-on-steroids-${key}`;
-  const beside = path.join(controlDir(userData), 's');
-  return beside.length <= 100 ? beside : path.join(os.tmpdir(), `cos-${uid}-${key}.sock`);
+  // A Unix socket path always uses POSIX separators, whatever host computed it.
+  const beside = path.posix.join(userData, 'control', 's');
+  return beside.length <= 100 ? beside : path.posix.join(os.tmpdir(), `cos-${uid}-${key}.sock`);
 }
 
 export function initControl(userData: string): void { userDataDir = userData; }
