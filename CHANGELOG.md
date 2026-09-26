@@ -9,6 +9,10 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.16] — 2026-09-26
+
+- Attach images and files again after ChatGPT dropped its named upload inputs and translated the attachment remove labels.
+
 ## [2.1.15] — 2026-09-26
 
 - Add the `cos` command and an opt-in local control endpoint (Settings → CLI access, off by default) so a terminal or coding agent can send tasks, wait, follow, steer running turns, list models and read chats through the same outbox as the composer.
