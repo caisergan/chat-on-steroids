@@ -9,6 +9,10 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.16] — 2026-09-26
+
+- Attach images and files again after ChatGPT dropped its named upload inputs and translated the attachment remove labels.
+
 ## [2.1.15] — 2026-09-26
 
 - Add the `cos` command and an opt-in local control endpoint (Settings → CLI access, off by default) so a terminal or coding agent can send tasks, wait, follow, steer running turns, list models and read chats through the same outbox as the composer.
@@ -19,7 +23,6 @@ the app refuses the extension and asks you to reload the matching copy.
 - Explain a queued message waiting behind a turn with no activity for ten minutes, and offer Stop turn.
 - Recognize ChatGPT's renamed composer form and its unlabeled Chat/Work toggle, and read live request ids from larger page caches so tool calls stay attributed.
 - Accept ChatGPT's Markdown readback as the send receipt, acknowledge new chats from their recorded first message, and keep the code-mode frame free of link-like syntax.
-- Attach images and files again after ChatGPT dropped its named upload inputs and translated the attachment remove labels.
 - Select a reused new-chat tab when background chats are off, and stop app frame text from replacing chat titles.
 - Find the development tunnel client inside the checkout.
 - Update the bundled OpenAI tunnel-client to v0.0.15.
