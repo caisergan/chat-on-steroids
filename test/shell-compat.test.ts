@@ -18,7 +18,7 @@ const OTHER = '55555555-5555-4555-8555-555555555555';
 let page: JSDOM;
 afterEach(() => page?.window.close());
 
-function fixture() {
+function fixture(composerForm = 'data-chatgpt-composer') {
   page = new JSDOM(`<div id="root"><aside id="app-shell-sidebar"></aside><main data-app-shell-main-surface>
     <div data-thread-find-target="conversation"><div data-turn-key="${USER}"><div data-content-search-turn-key="${TURN}">
       <div data-content-search-unit-key="${TURN}:0:user"><div data-user-message-bubble><div class="whitespace-pre-wrap">hello</div></div></div>
@@ -26,7 +26,7 @@ function fixture() {
         <div data-markdown-text-style="assistant-message">Commentary without a provider message id</div></div>
       <div data-content-search-unit-key="${TURN}:2:assistant"><div data-markdown-text-style="assistant-message">Answer</div></div>
     </div></div></div>
-    <form data-chatgpt-composer><div data-composer-body><div contenteditable="true" role="textbox" data-composer-markdown><p><br></p></div>
+    <form ${composerForm}><div data-composer-body><div contenteditable="true" role="textbox" data-composer-markdown><p><br></p></div>
       <button type="button" data-composer-navigation-target="add-context">+</button>
       <button type="button" aria-haspopup="menu" data-codex-intelligence-trigger="true" data-composer-navigation-target="reasoning" data-selected-reasoning-effort="medium">Mittel</button>
       <button type="submit" aria-label="Senden">Senden</button>
@@ -372,6 +372,19 @@ it('holds provisional shell request metadata until this document owns the native
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 });
 
+it('finds live shell request ids in the observed large compiler memo cache', async () => {
+  // Work-mode owner shape from a live page: 443 hooks and 41 memo slots, snapshot in the first.
+  const f = fixture(), { owner, snapshot } = liveShellMapping(f, true);
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => ({ slot: i }));
+  owner.updateQueue.memoCache.data = [[...filler(444), snapshot], ...Array.from({ length: 40 }, () => filler(4))];
+  let hook: any = null;
+  for (let at = 0; at < 443; at++) hook = { memoizedState: { slot: at }, next: hook };
+  owner.memoizedState = hook;
+  const turn = (await f.ask()).turns[0];
+  expect(turn.calls[0]).toMatchObject({ messageId: CALL, requestId: OTHER });
+  expect(turn.requests.map((request: any) => request.requestId)).toContain(OTHER);
+});
+
 it.each(['live', 'history', 'wrong-recipient', 'unselected', 'duplicate'])
   ('reads the mounted native Code Mode invocation metadata without its result body (%s)', async state => {
     const f = fixture(), { mapping } = liveShellMapping(f, true);
@@ -615,6 +628,17 @@ it('preserves prepared multiline text through the shell editor serializer', () =
   expect(f.doc.execCommand).toHaveBeenCalledOnce();
   expect(edit.box.querySelector('tag')).toBeNull();
 });
+it('accepts the renamed home composer form and its literal-paste editor', () => {
+  // Observed Work-mode home page: the form lost data-chatgpt-composer.
+  const f = fixture('class="relative flex flex-col gap-2" data-composer-placement="home" data-thread-find-composer="true"');
+  const box = f.doc.querySelector('[contenteditable]');
+  expect(f.api.composer()).toBe(box);
+  expect(f.api.composerVisible()).toBe(true);
+  expect(f.api.composerWritable()).toBe(true);
+  const edit = editing(f), value = 'Keep **literal** text\nand C:\\work.';
+  expect(f.api.insertPrompt(value, true)).toBe(true);
+  expect(edit.serialize()).toBe(value);
+});
 it('hides only a verified shell prompt frame and restores a recycled user bubble', async () => {
   const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;
   const raw = unit.querySelector('.whitespace-pre-wrap')!;
@@ -658,6 +682,28 @@ it('delivers three successive shell inputs with exact receipts and completed ans
   }
   expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
   expect(r.events().filter((e: any) => e.kind === 'turn_end' && e.outcome === 'completed')).toHaveLength(3);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+}, 15000);
+it('acknowledges an input that ChatGPT stored as escaped Markdown because it contains a relative link', async () => {
+  // 2026-09-25: `tools[name](args)` / `[a](b)` switch the native message to renderMarkdown.
+  const markdownReadback = (value: string) => value.replace(/[\\`*_#[\]()!]/g, '\\$&')
+    .replace(/ +$/gm, match => '&#x20;'.repeat(match.length)).replace(/\n/g, '\\\n');
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let latest: ReturnType<typeof addExchange> | undefined;
+  const text = '# Plan\nCall tools[name](args) and see [notes](docs/notes.md).  \nKeep C:\\work **literal**.';
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); latest = addExchange(f, 1, markdownReadback(edit.serialize())); edit.box.replaceChildren();
+  });
+  const offered = { id: '88888888-1111-4111-8111-000000000009', owner: 'owner-md', text,
+    model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
+  const r = await recorder(f, { desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input: offered } }) });
+  const pending = r.runtime({ type: 'clf-desktop-input', id: offered.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(latest).toBeDefined(), { timeout: 5000 });
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(await pending).toEqual({ ok: true });
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.ack && m.id === offered.id)).toHaveLength(1);
+  expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 15000);
 it.each([false, true])('bootstraps a shell worker with literal instructions and the exact native conversation (cold=%s)', async cold => {

@@ -238,6 +238,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
+| CLI control | `src/main/control.ts`, `src/shared/control.ts`, `src/cli/{cos,client,mcp,hooks}.ts`, `integrations/claude-code/*`, `.claude-plugin/marketplace.json`: local `cos` endpoint, task-state derivation, the Node-only CLI with its MCP server and hooks, and the Claude Code plugin. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
 
 ### One durable fact, one authoritative owner
@@ -1790,8 +1791,11 @@ not permission to add more startup openers.
 ### Browser choice and opening discipline
 
 `browser.ts`, `browser-preferences.ts` and `browser-startup.ts` keep the selected supported
-Chromium browser/profile separate from ChatGPT account state. Use the selected browser's
-process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
+Chromium browser/profile separate from ChatGPT account state. `search` is the macOS-only
+WebKit browser Search (github.com/caisergan/Search), which loads the unpacked companion through
+its own Chrome-extension engine; it takes URLs only via `open -a`, is detected by its bundle
+path, and refuses `chrome.debugger`, so focus-emulation leases and Desktop browser tools are
+unavailable there. Use the selected browser's process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
 OS wake launches require positive process absence and coalesce within one absence episode.
 The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
 
@@ -3075,6 +3079,74 @@ browser-chord policy prevents tab/window management through forbidden input chor
 focus chords support authorized navigation, like clicking or setting that same native control;
 it is not a general browser automation fallback. Capture/privacy settings and platform permission
 failures remain explicit, with no Linux/helper fallback that bypasses the capability model.
+
+### Local CLI (`cos`)
+
+**Intent:** a terminal or agent can hand work to ChatGPT through the same outbox the composer uses,
+and read back exactly what the app shows. The CLI owns no state.
+
+`control.ts` serves HTTP on a Unix socket (named pipe on Windows) inside userData/`control/`, only
+while `ui.cliControl` is on (default off). `applyControlSetting` follows Settings saves and
+`shutdownControl` runs in the first shutdown phase; both go through one serialized transition chain,
+so quick saves cannot open two listeners and shutdown cannot be undone by a pending start. A fresh
+random token is written to a `0600` file at each enable and every request needs it; `control.json`
+names the endpoint. There is no TCP listener. Operations reuse existing owners: `sendDesktopInput`
+(new chat = `auto` opening, follow-up in `--session` = `after-turn`, never an interruption),
+`listInputs`, the session store, `stopSessionTurn`, `cancelDesktopInput`. A task id is the outbox
+input id; a new chat's session id is the same value. `task` is refused only when the browser is not
+paired. The connector is not required: the browser sends and records without it, so a failure is a
+`cos doctor` warning (only file/tool work in the chat needs it). `doctor` first brings the connector
+up through `POST /v1/connect`, which reuses the send path's `start-input.ts::ready`; `status` stays
+read-only. Other unreadiness queues durably and is reported per task.
+
+Task state is derived on every read by `shared/control.ts::deriveTask` from the outbox row, the
+recorded events between the exact `user_message` (matched by `inputId`/`messageId`) and the next
+question, plus the live controlled turn (`sessionControlsFor`, never the persisted start alone):
+queued, sending, working, stalled (a running turn with no recorded activity for `STALLED_TURN_MS`,
+the same ten minutes as the queue notice), done (`result` is the last final reply before that turn's
+last `turn_end`, read in full from its overflow asset when capped), failed, cancelled. Fresh work
+after an end (the Thinking-failed case) keeps the task working. `cos wait` polls; the app never
+holds waiters, and a timed-out wait prints the task (`timedOut`) with exit 6. Flags are checked per
+command so a typo cannot become task text. An unfinished send with no progress for `STALLED_TURN_MS`
+is `stalled` whether or not the app still tracks the turn as live, so `wait`/`follow` stop instead
+of polling the whole timeout.
+
+`cos tasks` (alias `ps`) lists a person's recent sends with their derived state; it reads one
+shallow pass of facts per row and skips the live-turn lookup, so it can only under-report `stalled`
+as `working`, which the per-task views still resolve. `cos follow`/`--follow` streams the turn's
+activity: `shared/control.ts::activityLine` renders each `progress` (thinking), `page_tool`
+(browsing), `tool_call` and `chat_error` event, and `turnActivity` collapses a caption that grows in
+place to one line carrying its latest text at its first-seen position, so the client dedupes by
+`origin` with no cursor protocol. Exit codes (`EXIT`) are append-only. `cos` (`src/cli/cos.ts`,
+built as `out/main/cos.js`) imports only Node built-ins and shared modules without runtime imports
+(`shared/control.ts`, `shared/session.ts`, `main/version.ts`). Its userData lookup mirrors
+Electron's; `COS_USER_DATA` overrides it. Settings → Browser & history → **CLI access** is the
+switch.
+
+`steer` (`POST /v1/sessions/:id/steer`) is the composer's Inject now: `sendDesktopInput` with
+`delivery: 'tool'`, so the text reaches that chat's running turn through its next outer tool result;
+the outbox refuses it when no eligible turn exists and the endpoint turns that into a follow-up
+hint. `models` projects the saved picker catalog. `tasks?active=1` keeps unsettled work. `cos wait`
+takes several ids (`--any` returns at the first to settle).
+
+`src/cli/client.ts` is the only endpoint client; the commands, `cos mcp` and `cos hook` share its
+`pollTask`/`pollTasks`. `cos mcp` (`mcp.ts`) serves the same operations as MCP tools over
+newline-delimited stdio JSON-RPC, caps one wait at 540 s so a tool call stays bounded, streams
+activity as progress notifications and returns failures as `isError` results. `cos hook`
+(`hooks.ts`) answers Claude Code hooks: `session-start` lists active tasks; `guard` denies a send
+whose text matches a high-confidence credential shape; `track` records tasks this Claude session
+sent and every settled state a send or read (`wait`/`status`/`follow`) already showed; `notify` and
+`stop` report tracked tasks with news, and `stop` holds a turn at most once per state (never when
+`stop_hook_active`). Hook state is one JSON file per Claude session in a private temp folder; every
+hook failure is silent with exit 0.
+
+`integrations/claude-code` is the Claude Code plugin (`chat-on-steroids`): `.mcp.json` (server
+`chatgpt`), `hooks/hooks.json`, the `orchestrate-chatgpt` and `delegate-to-chatgpt` skills, the
+`chatgpt-worker` agent and `bin/cos`, a launcher that finds `cos.js` (`$COS_JS`, this checkout's
+build, then an installed app's asar) and runs it with `node` or the app's Electron in Node mode.
+`.claude-plugin/marketplace.json` at the repository root publishes it. Validate with `claude plugin
+validate integrations/claude-code` and `claude plugin validate .`. Not yet built: a Windows
+launcher, and a `cos` on PATH outside the plugin.
 
 ## 19. Debugging, tests and working here
 

@@ -26,6 +26,7 @@ import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
+import { applyControlSetting } from './control.js';
 /**
  * IPC surface.
  *
@@ -162,6 +163,7 @@ const settingsPatch = z.object({
     browserBridgePort: browserBridgePortSchema.optional(),
     browserOnly: z.boolean().optional(),
     autoRefreshPlugins: z.boolean().optional(),
+    cliControl: z.boolean().optional(),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
@@ -290,6 +292,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         : pick(current.ui.browserBridgePort ?? 'auto', base.ui.browserBridgePort ?? 'auto', wanted.ui.browserBridgePort),
       browserOnly: pick(current.ui.browserOnly, base.ui.browserOnly, wanted.ui.browserOnly),
       autoRefreshPlugins: pick(current.ui.autoRefreshPlugins, base.ui.autoRefreshPlugins, wanted.ui.autoRefreshPlugins),
+      cliControl: pick(current.ui.cliControl, base.ui.cliControl, wanted.ui.cliControl),
       tabsToKeepOpen: pick(current.ui.tabsToKeepOpen, base.ui.tabsToKeepOpen, wanted.ui.tabsToKeepOpen),
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
@@ -534,6 +537,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // the card still saying "not published" and nothing explaining why.
     await applySettings();
     if (before.ui.autoRefreshPlugins !== next.ui.autoRefreshPlugins) wakeBrowserWork();
+    await applyControlSetting();
     logInfo('settings updated');
     // The config and runtime side effects above still complete so the app does not stay half-on,
     // but the UI must not be told the pause was safely accepted when its retained authority

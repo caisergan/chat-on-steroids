@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "chatgpt": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/cos",
+      "args": ["mcp"]
+    }
+  }
+}

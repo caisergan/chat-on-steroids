@@ -1,0 +1,10 @@
+{
+  "name": "chat-on-steroids",
+  "version": "0.1.0",
+  "description": "Let Claude orchestrate ChatGPT through the Chat On Steroids desktop app: send and supervise tasks in real ChatGPT chats, steer or stop them, and verify their work.",
+  "author": { "name": "Chat On Steroids" },
+  "homepage": "https://github.com/totec448-spec/chat-on-steroids",
+  "repository": "https://github.com/totec448-spec/chat-on-steroids",
+  "license": "MIT",
+  "keywords": ["chatgpt", "orchestration", "delegation", "mcp"]
+}

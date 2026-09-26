@@ -341,6 +341,32 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     } finally { vi.useRealTimers(); }
   });
 
+  it.each([true, false])('selects a reused new-chat tab only when background chats are off (background=%s)', async background => {
+    const rendered = new Set<number>(), inputs = [{ id: firstId, conversationId: null }];
+    const h = await worker(inputs, undefined, {}, {}, rendered);
+    const tab = { id: 7, url: 'https://chatgpt.com/', active: false };
+    h.tabs.push(tab);
+    await h.authorizeDocument({ tab, documentId: 'reused-home', frameId: 0, url: tab.url }, { navigationEpoch: 1 });
+    h.fetch.mockImplementation(async (input: string) => ({ ok: true, status: 200, json: async () => new URL(input).pathname === '/hello'
+      ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
+      : { ok: true, inputs, background, inputOpeningIds: inputs.map(input => input.id), nonDiscardableConversations: [] } }));
+    h.sendMessage.mockImplementation(async (_id, message): Promise<any> => {
+      if (message.type === 'clf-input-reuse-state') return { safe: true, navigationEpoch: 1 };
+      if (message.type === 'clf-prepare-desktop-input') {
+        if (!rendered.has(7)) return { ready: false };
+        tab.url = `https://chatgpt.com/?cos-input=${firstId}#cos-input=${firstId}`;
+        h.updated(7, { status: 'loading', url: tab.url }); h.updated(7, { status: 'complete' });
+        return { ready: true };
+      }
+      return { ok: true };
+    });
+    await h.maintain();
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.sendMessage.mock.calls.some(([id, message]) => id === 7 && message.type === 'clf-desktop-input' && message.id === firstId)).toBe(true);
+    expect(h.update.mock.calls.filter(([id, patch]) => id === 7 && patch.active === true)).toHaveLength(background ? 0 : 1);
+    expect(h.windows.update.mock.calls.some(([, patch]) => patch.focused === true)).toBe(false);
+  });
+
   it.each(['home', 'catalog'])('protects a hidden %s before preparing and offering its first input', async surface => {
     const rendered = new Set<number>(), inputs = [{ id: firstId, conversationId: null }];
     const h = await worker(inputs, undefined, {}, {}, rendered);

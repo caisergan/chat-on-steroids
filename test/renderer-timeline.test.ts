@@ -662,6 +662,25 @@ it('identifies automatic Continue without user-task editing or reordering and ke
   expect(w.document.querySelectorAll('#finishQueue [aria-label="Edit queued task"]')).toHaveLength(2);
 });
 
+it.each([25, 2])('explains a message queued behind a running turn silent for %i min and offers Stop only when stalled', async minutes => {
+  const rows: SessionEvent[] = [{ seq: 1, time: Date.now() - minutes * 60_000, source: 'extension', kind: 'user_message',
+    messageId: 'long-task', message: text('Long task') }];
+  const { w, live, append } = await boot(rows);
+  const stops: unknown[][] = [];
+  (w as any).api.stopSessionTurn = (...args: unknown[]) => { stops.push(args); return Promise.resolve({ ok: true, data: null }); };
+  live.inputs.push({ id: 'waiting-status', sessionId: summary(rows).id, text: "what's the status?", mode: 'auto', dueAt: 0,
+    model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: Date.now(), conversationId: 'chat-a' });
+  await append([]);
+  const row = w.document.querySelector('#inputQueue [data-input-id="waiting-status"]')!;
+  expect(row.textContent).toContain("what's the status?");
+  const notice = row.querySelector('.pending-message-stall');
+  if (minutes < 10) { expect(notice).toBeNull(); return; }
+  expect(notice?.textContent).toContain(`no activity for ${minutes} min`);
+  notice!.querySelector<HTMLButtonElement>('button')!.click();
+  await settle();
+  expect(stops).toEqual([[summary(rows).id, 'held-turn']]);
+});
+
 it('keeps a transport-deferred immediate upload visible with cancellation instead of an invalid task editor', async () => {
   const { w, live, append } = await boot([]);
   live.inputs.push({ id: 'native-correction', sessionId: summary([]).id, text: 'Waiting upload', mode: 'after-turn', requestedMode: 'auto',

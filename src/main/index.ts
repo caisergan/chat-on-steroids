@@ -1,4 +1,5 @@
 import { stopInputStartup } from './session/start-input.js';
+import { applyControlSetting, initControl, shutdownControl } from './control.js';
 import { browserExtensionRequired } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
@@ -23,8 +24,10 @@ import {
   flushRecorder,
   queueDeterministicAttributionRepair,
   setAgentBinder,
-  setAgentConversationLookup
+  setAgentConversationLookup,
+  setRecordedUserMessageListener
 } from './session/recorder.js';
+import { acknowledgeRecordedOpening, acknowledgeRecordedOpenings } from './session/input.js';
 import {
   agentConversation,
   bindConversation,
@@ -307,6 +310,7 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  initControl(userData);
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
@@ -339,6 +343,9 @@ void app.whenReady().then(async () => {
   // The prime's chat is the user's own, so no extension report can name it. It is bound
   // when the recorder manages to place the prime's first call. See recordToolCall.
   setAgentBinder(bindConversation);
+  // A fresh chat whose page lost its Send receipt is reconciled from the recorded message.
+  setRecordedUserMessageListener(sessionId => void acknowledgeRecordedOpening(sessionId).catch(() => false));
+  void acknowledgeRecordedOpenings().catch(() => undefined);
   // Before anything can call an agent tool, and before a run is restored: the broker
   // decides whether a previous run has been abandoned partly from which ChatGPT tabs are
   // open, and without this it can only answer "I cannot see" — which it treats, on
@@ -449,6 +456,7 @@ void app.whenReady().then(async () => {
     void startBridge();
   }
   if (getConfig().ui.autoConnect) void connect();
+  void applyControlSetting();
 
   // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
   // window that is already on screen. Everything it learns arrives through the ordinary state
@@ -498,7 +506,7 @@ app.on('will-quit', (event) => {
       // The budget has to clear the drains it contains, or it would silently defeat them:
       // the bridge force-closes wedged localhost sockets at 15s and the MCP endpoint forces
       // its own drain at 30s. This is the outer bound on both, not a competing one.
-      { name: 'admission/drain', budgetMs: 40_000, run: () => [shutdownConnection(), shutdownBridge()] },
+      { name: 'admission/drain', budgetMs: 40_000, run: () => [shutdownConnection(), shutdownBridge(), shutdownControl()] },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
         name: 'process cleanup',

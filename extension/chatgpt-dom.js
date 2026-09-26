@@ -41,7 +41,9 @@ var CLF_DOM = (() => {
   const STOP =
     'button[data-testid="stop-button"], button[data-testid="composer-stop-button"], ' +
     'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"]';
-  const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i], form[data-chatgpt-composer] button[type="submit"]';
+  // The shell has renamed its composer form (data-chatgpt-composer → data-thread-find-composer).
+  const COMPOSER_FORM = 'form:is([data-chatgpt-composer], [data-thread-find-composer])';
+  const SEND = `button[data-testid="send-button"], form button[aria-label^="Send" i], ${COMPOSER_FORM} button[type="submit"]`;
   /** The composer's own trailing controls, where the send and dictation buttons live. */
   const TRAILING =
     '[data-testid="composer-trailing-actions"], [data-testid="composer-footer-actions"], ' +
@@ -1440,7 +1442,7 @@ var CLF_DOM = (() => {
     return safe(() => {
       const classic = document.querySelector('#prompt-textarea');
       if (classic) return classic;
-      const candidates = [...document.querySelectorAll('form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]')]
+      const candidates = [...document.querySelectorAll(`${COMPOSER_FORM} [contenteditable="true"][role="textbox"]`)]
         .filter(node => !node.closest(`${OWN_SURFACES},[data-turn-key],.markdown,[hidden],[aria-hidden="true"],[inert]`));
       return candidates.length === 1 ? candidates[0] : null;
     }, null);
@@ -1902,7 +1904,7 @@ var CLF_DOM = (() => {
       const paragraph = document.createElement('p');
       // @ehkogh/#318: the shell's Markdown serializer otherwise escapes text and
       // hard breaks. Its native literalPaste mark preserves the submitted bytes.
-      const host = box.matches('[data-composer-markdown]') && box.closest('form[data-chatgpt-composer]')
+      const host = box.matches('[data-composer-markdown]') && box.closest(COMPOSER_FORM)
         ? document.createElement('span') : paragraph;
       if (host !== paragraph) {
         host.setAttribute('data-prompt-literal-paste', '');
@@ -2347,6 +2349,36 @@ var CLF_DOM = (() => {
   }
   /** Account model discovery belongs to Chat; Work mounts a different picker.
    * The caller owns one idle document and verifies draft/epoch before and after this transition. */
+  /**
+   * The 2026-09 composer mode group: two unlabeled `button[aria-pressed]` (Chat, Work) whose
+   * value lives only in React state. Its captions are translated, so Chat is proven by the
+   * composer instead: a Chat form carries data-chatgpt-composer, a Work form does not.
+   * Click only the one unpressed peer, then require that exact form evidence.
+   */
+  async function prepareChatModeGroup(stillCurrent) {
+    const chatForm = () => !!composer()?.closest('form')?.hasAttribute('data-chatgpt-composer');
+    const workForm = () => !!composer()?.closest('form[data-thread-find-composer]') && !chatForm();
+    if (!workForm()) return true;
+    const groups = [...document.querySelectorAll('[role="group"]')].filter(group => !group.closest(OWN_SURFACES) &&
+      group.getClientRects().length > 0 && group.querySelectorAll('button[aria-pressed]').length === 2);
+    if (groups.length !== 1) return false;
+    const buttons = [...groups[0].querySelectorAll('button[aria-pressed]')];
+    const idle = buttons.filter(button => button.getAttribute('aria-pressed') === 'false');
+    if (idle.length !== 1 || idle[0].disabled || idle[0].getAttribute('aria-disabled') === 'true') return false;
+    const target = idle[0];
+    return new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
+      const check = () => {
+        if (!stillCurrent()) return finish(false);
+        if (target.getAttribute('aria-pressed') === 'true' && chatForm()) finish(true);
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+      const timer = setTimeout(() => finish(false), 5000);
+      target.click(); check();
+    });
+  }
   async function prepareChatModelSurface(stillCurrent = () => true) {
     const radios = () => [...document.querySelectorAll('[role="radio"][data-tpp-toggle-value]')]
       .filter(node => !node.closest(OWN_SURFACES) && node.getClientRects().length > 0);
@@ -2358,7 +2390,7 @@ var CLF_DOM = (() => {
     if (!stillCurrent()) return false;
     const before = state();
     // Existing ordinary conversations do not expose the new-chat surface toggle.
-    if (!before) return radios().length === 0;
+    if (!before) return radios().length === 0 ? prepareChatModeGroup(stillCurrent) : false;
     if (before.chat.getAttribute('aria-checked') === 'true') return true;
     if (before.work.getAttribute('aria-checked') !== 'true' || before.chat.disabled || before.chat.getAttribute('aria-disabled') === 'true') return false;
     return new Promise(resolve => {

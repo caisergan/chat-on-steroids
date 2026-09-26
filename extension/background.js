@@ -1977,6 +1977,9 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
           if (prepared?.ready === true && matchesInput(input, latest)) {
             await elect(input.id, { tab: candidate.id, stage: 'ready' });
             tab = latest;
+            // A reused page is this new chat's tab. With background chats off, select it the
+            // same way createChatTab would, without taking OS focus from the desktop app.
+            if (!background && !latest.active) await chrome.tabs.update(candidate.id, { active: true }).catch(() => undefined);
             offerDesktopInput(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: null });
           } else if (prepared?.fallback === true && prepared.preSend === true) {
             // Explicit native transition failure, before claim/insertion/send, owns

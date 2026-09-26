@@ -236,8 +236,11 @@
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
+  "Search (macOS)": "Search (macOS)",
   "Background chats": "Chats en arrière-plan",
   "Keep app-created ChatGPT tabs in the background.": "Garder les onglets ChatGPT créés par l'application en arrière-plan.",
+  "CLI access": "Accès CLI",
+  "Let the cos command on this computer send tasks to ChatGPT and read your chats. Only your user account can connect.": "Permet à la commande cos de cet ordinateur d'envoyer des tâches à ChatGPT et de lire vos chats. Seul votre compte utilisateur peut s'y connecter.",
   "Automatic plugin refresh": "Actualisation automatique des plugins",
   "Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.": "Laisser le compagnon actualiser les outils modifiés du connecteur dans ChatGPT. Désactivé par défaut ; l'actualisation manuelle reste disponible dans ChatGPT.",
   "Browser only": "Navigateur uniquement",
@@ -1450,5 +1453,6 @@
   "A little wooden companion with a baseball bat.": "Un petit compagnon en bois avec une batte de baseball.",
   "A crocodile bomber with tiny propellers and a big personality.": "Un crocodile bombardier avec de petites hélices et une forte personnalité.",
   "Auto-connect": "Connexion automatique",
-  "{0}: drag, click, or open the context menu": "{0} : glisser, cliquer ou ouvrir le menu contextuel"
+  "{0}: drag, click, or open the context menu": "{0} : glisser, cliquer ou ouvrir le menu contextuel",
+  "Waiting for the current turn: ChatGPT has shown no activity for {0} min but still reports it as running.": "En attente du tour en cours : ChatGPT n’affiche aucune activité depuis {0} min mais le signale toujours comme en cours."
 }

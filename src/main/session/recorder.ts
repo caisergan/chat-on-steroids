@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
-import { userTitle } from './title.js';
+import { isFrameTitle, userTitle } from './title.js';
 import type {
   ActivitySummary,
   AgentMessage,
@@ -1619,6 +1619,12 @@ export function setCallAttributionListener(
   attributionListener = listen;
 }
 
+let recordedUserMessageListener: ((sessionId: string) => void) | null = null;
+/** Set at startup so the input owner can reconcile an opening whose page receipt was lost. */
+export function setRecordedUserMessageListener(listen: ((sessionId: string) => void) | null): void {
+  recordedUserMessageListener = listen;
+}
+
 /** Set by the agent broker, for the deferred prime binding in recordToolCall. */
 export function setAgentBinder(bind: (agent: string, conversationId: string) => void): void {
   agentBinder = bind;
@@ -1904,7 +1910,7 @@ function observedUserTitle(first?: string): string | undefined {
 }
 
 function observationTitle(observations: readonly ChatObservation[]): string | undefined {
-  const title = observations.find((item) => item.kind === 'conversation_title')?.text?.trim();
+  const title = observations.find((item) => item.kind === 'conversation_title' && !isFrameTitle(item.text))?.text?.trim();
   const first = observations.find((item) => item.kind === 'user_message')?.text;
   return title || observedUserTitle(first);
 }
@@ -2073,7 +2079,7 @@ async function recordChatObservationsNow(
   // an intermediate array for every batch).
   for (const item of observations) {
     if (!firstUser && item.kind === 'user_message') firstUser = item;
-    if (item.kind === 'conversation_title') pageTitle = item;
+    if (item.kind === 'conversation_title' && !isFrameTitle(item.text)) pageTitle = item;
     if (item.kind === 'turn_start' && item.turnId) batchTurnStarts.set(item.turnId, item.time);
     if (item.kind === 'turn_end' && item.turnId) {
       explicitEnds.add(item.turnId);
@@ -2126,6 +2132,9 @@ async function recordChatObservationsNow(
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
+        // Outside this batch: the input owner reads the flushed transcript itself.
+        const listener = recordedUserMessageListener;
+        if (listener) setTimeout(() => listener(sessionId), 0);
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
           activity.working = true;

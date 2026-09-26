@@ -246,8 +246,11 @@
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
+  "Search (macOS)": "Search (macOS)",
   "Background chats": "后台聊天",
   "Keep app-created ChatGPT tabs in the background.": "应用创建的 ChatGPT 标签页保持在后台。",
+  "CLI access": "CLI 访问",
+  "Let the cos command on this computer send tasks to ChatGPT and read your chats. Only your user account can connect.": "允许此电脑上的 cos 命令向 ChatGPT 发送任务并读取你的聊天。只有你的用户帐户可以连接。",
   "Automatic plugin refresh": "自动刷新插件",
   "Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.": "允许配套扩展在 ChatGPT 中刷新变更后的连接器工具。默认关闭；仍可在 ChatGPT 中手动刷新。",
   "Browser only": "仅浏览器",
@@ -1393,5 +1396,6 @@
   "Terminal height": "终端高度",
   "Open a terminal in this project": "在此项目中打开终端",
   "Select a project to open a terminal": "选择一个项目以打开终端",
-  "Terminal input is busy. Try a smaller paste.": "终端输入繁忙，请减少粘贴的文本。"
+  "Terminal input is busy. Try a smaller paste.": "终端输入繁忙，请减少粘贴的文本。",
+  "Waiting for the current turn: ChatGPT has shown no activity for {0} min but still reports it as running.": "正在等待当前轮次：ChatGPT 已 {0} 分钟没有活动，但仍报告其正在运行。"
 }

@@ -44,8 +44,10 @@ export function registerCodeMode(
   reg.register('exec', codeModeDeclaration(options), codeModeHandler(() => reg.descriptions(), invoke, options));
 }
 
+// ChatGPT's composer treats any `[text](non-URL)` as a Markdown link and then sends the whole
+// prompt as escaped Markdown. Keep this frame free of that shape (e.g. `tools[name](args)`).
 export const CODE_MODE_INSTRUCTIONS = `Code mode: use exec with JavaScript to compose this connector's tools by their listed names and argument schemas. Inspect content, structuredContent and isError in each MCP result. Only text(...) and image(...) emit output. For a requests array you define:
-const results = await Promise.all(requests.map(({name, args}) => tools[name](args)));
+const results = await Promise.all(requests.map(({name, args}) => { const tool = tools[name]; return tool(args); }));
 text(results.map((result, index) => ({index, isError: result.isError ?? false, content: result.content})));
 Keep emitted text within 40,000 UTF-8 bytes total. For large read batches, request smaller max_bytes or line ranges, filter the returned content, or use read directly. Forward images with image(...), not text(result); base64 serialized as text consumes the text limit. An oversized text emission returns an explicitly truncated preview and stops the script; inspect already dispatched calls before retrying.
 Run independent calls in parallel only when they cannot conflict; await mutations before dependent work. Forward native images with image(result.content.find(item => item.type === "image")). Children keep the parent’s exact or permitted request identity, recheck live permissions and record separately. No text/image means no emitted output. New user instructions and worker inbox messages arrive with the outer result, outside filtering. Call finish/lifecycle tools directly and supply their actual target. Prefer direct tools for simple calls or native file arguments. No persistent state or wait tool; long-running tools use their usual continuation IDs.`;

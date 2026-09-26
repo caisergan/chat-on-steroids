@@ -2918,6 +2918,11 @@ describe('naming the chats this app opened', () => {
       authoredText: 'Real request', message: { text: rendered, chars: rendered.length, truncated: false }
     });
     expect((await getSession(opened.sessionId!))?.title).toBe('Real request');
+    // The 2026-09 shell titles an untitled tab with its first message: the app's own frame.
+    for (const frame of ['[[COS_CONTEXT:41949]]You are a coding agent', '\\[\\[COS\\_CONTEXT:41949\\]\\]You are']) {
+      await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: frame }]);
+      expect((await getSession(opened.sessionId!))?.title).toBe('Real request');
+    }
     await recordChatObservations(conversationId, [
       { kind: 'conversation_title', time: Date.now(), text: 'Readable generated title' }
     ]);

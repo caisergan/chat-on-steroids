@@ -712,6 +712,14 @@
   const sendText = (value) => String(value || '').replace(/\s+/g, '');
   /** Undo page-readback punctuation escapes only; never rewrite authored Send text. */
   const unescapeMarkdown = (value) => String(value || '').replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
+  /**
+   * ChatGPT stores a message as Markdown (renderMarkdown) when it contains a link-shaped
+   * `[text](non-URL)`, typed or pasted. Its serializer then escapes punctuation, writes hard
+   * breaks as `\` + newline and trailing spaces as `&#x20;`. That readback is the same authored
+   * text; decode only those three encodings for receipt comparison, never for sending.
+   */
+  const unescapeReadback = (value) => unescapeMarkdown(String(value || '')
+    .replace(/&#x20;/gi, ' ').replace(/\\\n/g, '\n'));
   /** The leading continuation marker, as typed or as the composer escaped it. */
   const markedAs = (value) => {
     const text = String(value || '');
@@ -758,6 +766,14 @@
     const source = userMessageSource(message);
     return source !== null && sendText(source.text) === sendText(expected);
   }
+  /** Desktop Send receipt only: the exact row may return as ChatGPT's escaped Markdown. Later
+   * ownership (matchesUserSendReceipt) keeps the strict text contract above. */
+  function matchesSubmittedReadback(message, expected) {
+    if (matchesSubmittedUser(message, expected)) return true;
+    if (typeof expected !== 'string' || expected.length > 240000) return false;
+    const source = userMessageSource(message);
+    return source !== null && sendText(unescapeReadback(source.text)) === sendText(expected);
+  }
   /** An app-owned bootstrap may return escaped. Ordinary input authorization keeps
    * matchesSubmittedUser; native message identity and document lifetime still own the receipt. */
   function matchesSubmittedBootstrap(message, expected) {
@@ -769,7 +785,7 @@
     // A marker-only escape must not consume literal path/glob backslashes in the brief.
     if (actualMarker && expectedMarker && actualMarker[1] === expectedMarker[1] && actualMarker[2] === expectedMarker[2] &&
         sendText(source.text.slice(actualMarker[0].length)) === sendText(expected.slice(expectedMarker[0].length))) return true;
-    return sendText(unescapeMarkdown(source.text)) === sendText(expected);
+    return sendText(unescapeReadback(source.text)) === sendText(expected);
   }
   // A first fresh route may await authored evidence. A second route (including an
   // observed return to New Chat) revokes this send; text proof is not its lifetime.
@@ -11056,12 +11072,12 @@
       }, (user, conversation) => {
         if ((!conversation && !temporary) || (target && !onTarget())) return false;
         const users = CLF_DOM.messages().filter(row => row.role === 'user');
-        if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedUser(user, submittedText)) return false;
+        if ((!target && users.length !== 1) || users.at(-1)?.id !== user.id || user.id === previousUserId || !matchesSubmittedReadback(user, submittedText)) return false;
         // Freeze only identity while native Send still holds the proven row. React
         // may replace it before this async operation resumes; do not rediscover it.
         receipt = { conversation, user: { id: user.id } };
         return true;
-      }))) return false;
+      }, matchesSubmittedReadback))) return false;
       if (!receipt || !sendingTarget()) return false;
       // Native Send listeners refresh the receipt; pin only that witnessed object.
       const witnessedSendReceipt = userSendReceipt;

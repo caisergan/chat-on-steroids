@@ -40,6 +40,24 @@ it('switches the observed Work surface to Chat once without relying on translate
   expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
   expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
 });
+it.each(['work', 'chat', 'two-groups', 'revoked'])('switches the 2026-09 unlabeled mode group to Chat by composer evidence (%s)', async kind => {
+  // Observed Work page: form[data-thread-find-composer] without data-chatgpt-composer; captions are translated.
+  const group = '<div role="group" aria-label="Mode"><button type="button" aria-pressed="false">Sohbet</button><button type="button" aria-pressed="true">Çalışma</button></div>';
+  page = new JSDOM(`${group}${kind === 'two-groups' ? group : ''}<form data-composer-placement="home" data-thread-find-composer="true"${kind === 'chat' ? ' data-chatgpt-composer=""' : ''}>` +
+    '<div contenteditable="true" role="textbox" data-composer-markdown></div></form>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
+  Object.defineProperty(page.window.HTMLElement.prototype, 'getClientRects', { value: () => [{}] });
+  page.window.eval(domSource);
+  const doc = page.window.document, [chat, work] = [...doc.querySelectorAll('button')];
+  const click = vi.fn(() => {
+    chat!.setAttribute('aria-pressed', 'true'); work!.setAttribute('aria-pressed', 'false');
+    doc.querySelector('form')!.setAttribute('data-chatgpt-composer', '');
+  });
+  chat!.addEventListener('click', click);
+  const api = (page.window as any).CLF_DOM;
+  const result = await api.prepareChatModelSurface(kind === 'revoked' ? () => false : undefined);
+  expect(result).toBe(kind === 'work' || kind === 'chat');
+  expect(click).toHaveBeenCalledTimes(kind === 'work' ? 1 : 0);
+});
 function fixture(versionCaption = '', closeDelay: number | null = 0) {
   page = new JSDOM('<form><div id="prompt-textarea" contenteditable="true"></div><div data-testid="composer-trailing-actions"><button type="button" aria-haspopup="menu">Denkaufwand</button><button data-testid="send-button">Senden</button></div></form>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
   const win = page.window, doc = win.document;

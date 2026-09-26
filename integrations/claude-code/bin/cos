@@ -1,0 +1,36 @@
+#!/bin/sh
+# Runs the cos CLI that belongs to Chat On Steroids.
+#
+# Script, in order: $COS_JS; this checkout's build (development, `npm run build`); the cos.js
+# inside an installed app. Runtime: `node` on PATH, otherwise the app's own Electron binary in
+# Node mode, so an installed app needs nothing else. Hooks stay silent when nothing is found.
+here=$(cd "$(dirname "$0")" && pwd)
+
+app_bin=""
+for app in "/Applications/Chat On Steroids.app" "$HOME/Applications/Chat On Steroids.app"; do
+  if [ -x "$app/Contents/MacOS/Chat On Steroids" ]; then
+    app_bin="$app/Contents/MacOS/Chat On Steroids"; app_js="$app/Contents/Resources/app.asar/out/main/cos.js"; break
+  fi
+done
+if [ -z "$app_bin" ] && [ -x "/opt/Chat On Steroids/chat-on-steroids" ]; then
+  app_bin="/opt/Chat On Steroids/chat-on-steroids"; app_js="/opt/Chat On Steroids/resources/app.asar/out/main/cos.js"
+fi
+
+script="${COS_JS:-}"
+if [ -z "$script" ] && [ -f "$here/../../../out/main/cos.js" ]; then script="$here/../../../out/main/cos.js"; fi
+
+run() {
+  if command -v node >/dev/null 2>&1; then exec node "$@"; fi
+  if [ -n "$app_bin" ]; then ELECTRON_RUN_AS_NODE=1 exec "$app_bin" "$@"; fi
+  return 1
+}
+
+if [ -n "$script" ]; then run "$script" "$@"; fi
+# The app bundle is read through Electron, which understands its asar archive.
+if [ -n "$app_bin" ] && ELECTRON_RUN_AS_NODE=1 "$app_bin" -e "process.exit(require('fs').existsSync(process.argv[1]) ? 0 : 1)" "$app_js" 2>/dev/null; then
+  ELECTRON_RUN_AS_NODE=1 exec "$app_bin" "$app_js" "$@"
+fi
+
+if [ "$1" = "hook" ]; then exit 0; fi
+echo "cos: Chat On Steroids with CLI support was not found. Install or update the app, or set COS_JS to the path of cos.js." >&2
+exit 3

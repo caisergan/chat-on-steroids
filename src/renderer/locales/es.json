@@ -236,8 +236,11 @@
   "Google Chrome / Chromium": "Google Chrome / Chromium",
   "Microsoft Edge": "Microsoft Edge",
   "Brave Browser": "Brave Browser",
+  "Search (macOS)": "Search (macOS)",
   "Background chats": "Chats en segundo plano",
   "Keep app-created ChatGPT tabs in the background.": "Mantener en segundo plano las pestañas de ChatGPT creadas por la aplicación.",
+  "CLI access": "Acceso por CLI",
+  "Let the cos command on this computer send tasks to ChatGPT and read your chats. Only your user account can connect.": "Permite que el comando cos de este equipo envíe tareas a ChatGPT y lea tus chats. Solo tu cuenta de usuario puede conectarse.",
   "Automatic plugin refresh": "Actualización automática de complementos",
   "Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.": "Permite que la extensión complementaria actualice en ChatGPT las herramientas modificadas de los conectores. Está desactivado de forma predeterminada; puedes seguir actualizándolas manualmente en ChatGPT.",
   "Browser only": "Solo navegador",
@@ -1393,5 +1396,6 @@
   "Terminal height": "Altura del terminal",
   "Open a terminal in this project": "Abrir un terminal en este proyecto",
   "Select a project to open a terminal": "Selecciona un proyecto para abrir un terminal",
-  "Terminal input is busy. Try a smaller paste.": "La entrada del terminal está ocupada. Intenta pegar menos texto."
+  "Terminal input is busy. Try a smaller paste.": "La entrada del terminal está ocupada. Intenta pegar menos texto.",
+  "Waiting for the current turn: ChatGPT has shown no activity for {0} min but still reports it as running.": "Esperando el turno actual: ChatGPT lleva {0} min sin actividad, pero sigue indicando que está en curso."
 }

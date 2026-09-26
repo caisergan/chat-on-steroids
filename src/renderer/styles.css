@@ -2837,6 +2837,9 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 /* Match the canonical user row's padding and footer before receipt arrives. */
 #inputQueue > .pending-message { margin-top: 11px; margin-bottom: 33px; }
 .pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: 1.75; }
+.pending-message-stall { display: flex; align-items: center; gap: 10px; max-width: 520px; margin-top: 18px; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
+.pending-message-stall-text { flex: 1; text-align: end; }
+.pending-message-stall-stop { flex: none; }
 .pending-message-status { position: absolute; right: 30px; top: calc(100% + 1px); height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message.is-delivery-error .pending-message-status { position: static; display: block; height: auto; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pending-message.is-delivery-error .pending-message-status { color: var(--red); }

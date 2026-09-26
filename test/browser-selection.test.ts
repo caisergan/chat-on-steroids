@@ -2,7 +2,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, loadConfig, saveConfig } from '../src/main/config.js';
-import { openInPreferredBrowser, preferredBrowserCandidates } from '../src/main/browser.js';
+import { isPreferredBrowserRunning, openInPreferredBrowser, preferredBrowserCandidates } from '../src/main/browser.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let dir: string;
@@ -60,4 +60,29 @@ it('finds Brave installations on each platform without mixing in Chrome or Edge'
   expect(linux).toContain('/opt/brave.com/brave/brave-browser');
   expect(linux).toContain('/snap/bin/brave');
   expect(linux.every(candidate => !/chrome|chromium|edge/.test(candidate))).toBe(true);
+});
+
+it('finds Search only as a macOS app bundle and opens it through LaunchServices', async () => {
+  expect(preferredBrowserCandidates('darwin', {}, '/Users/example', 'search')).toEqual([
+    '/Applications/Search.app/Contents/MacOS/Search',
+    '/Users/example/Applications/Search.app/Contents/MacOS/Search'
+  ]);
+  expect(preferredBrowserCandidates('win32', { LOCALAPPDATA: 'C:\\Local' }, undefined, 'search')).toEqual([]);
+  expect(preferredBrowserCandidates('linux', { PATH: '/usr/bin' }, '/home/example', 'search')).toEqual([]);
+  const launch = vi.fn();
+  const url = 'https://chatgpt.com/?cos-model-catalog=owned';
+  await openInPreferredBrowser(url, { browser: 'search', platform: 'darwin', home: '/Users/example', usable: () => true, launch });
+  expect(launch).toHaveBeenLastCalledWith('/usr/bin/open', ['-a', '/Applications/Search.app', url], '/Applications/Search.app/Contents/MacOS');
+  await openInPreferredBrowser(url, { browser: 'search', platform: 'darwin', home: '/Users/example', usable: () => true, launch, backgroundStartup: true });
+  expect(launch).toHaveBeenLastCalledWith('/usr/bin/open', ['-g', '-a', '/Applications/Search.app', url], '/Applications/Search.app/Contents/MacOS');
+  await expect(openInPreferredBrowser(url, { browser: 'search', platform: 'linux', usable: () => true, launch })).rejects.toThrow('Search was not found');
+});
+
+it('detects a running Search by its bundle path, not the generic executable name', async () => {
+  const ps = (stdout: string) => vi.fn(async () => ({ stdout, stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 }));
+  const powershell = vi.fn();
+  expect(await isPreferredBrowserRunning('darwin', powershell, 'search', ps('/usr/libexec/searchpartyd\n/Applications/Search.app/Contents/MacOS/Search\n'))).toBe(true);
+  expect(await isPreferredBrowserRunning('darwin', powershell, 'search', ps('/usr/libexec/searchpartyd\n/opt/tools/Search\n'))).toBe(false);
+  expect(await isPreferredBrowserRunning('win32', powershell, 'search', ps(''))).toBeNull();
+  expect(powershell).not.toHaveBeenCalled();
 });
