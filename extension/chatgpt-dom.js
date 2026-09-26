@@ -2068,8 +2068,12 @@ var CLF_DOM = (() => {
     }
   }
 
-  /** Native ChatGPT photo input, observed as #upload-photos. Sending waits for every tile. */
+  /** Native ChatGPT photo/file input and its attachment tiles. Sending waits for every tile. */
   function composerFileName(button) {
+    // Current tiles: a [role=button] named by the bare filename, holding only its remove
+    // button, whose own label is translated ("Remove …", "… ekini kaldır").
+    const tile = button.parentElement?.closest('[data-composer-attachments] [role="button"][aria-label]');
+    if (tile) return tile.querySelectorAll('button').length === 1 ? tile.getAttribute('aria-label') || undefined : undefined;
     const group = button.closest('[role="group"][aria-label]');
     if (group?.querySelector('[data-default-action="true"] button')) {
       const actions = [...group.querySelectorAll('button')].filter(node => !node.closest('[data-default-action="true"]'));
@@ -2128,7 +2132,12 @@ var CLF_DOM = (() => {
     if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
     if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
-    const input = document.querySelector(files.length ? 'input#upload-files[type="file"]' : 'input#upload-photos[type="file"][accept="image/*"]');
+    // Older pages name the inputs; current ones carry generated ids, so fall back to the
+    // composer's only file input with the matching accept list.
+    const named = document.querySelector(files.length ? 'input#upload-files[type="file"]' : 'input#upload-photos[type="file"][accept="image/*"]');
+    const unnamed = [...(composerBox()?.querySelectorAll('input[type="file"]') || [])]
+      .filter(node => files.length ? !node.accept : node.accept === 'image/*');
+    const input = named || (unnamed.length === 1 ? unnamed[0] : null);
     if (!input) return false;
     const priorTiles = new Set((composerBox() || composerActions()?.host)?.querySelectorAll('button[aria-label]') || []);
     const transfer = new DataTransfer();
