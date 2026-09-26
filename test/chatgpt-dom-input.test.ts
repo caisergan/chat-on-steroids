@@ -504,6 +504,24 @@ describe('native image readiness', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(await uploaded).toBe(true);
   });
+  it('finds an unnamed image input and reads localized current tiles by filename', async () => {
+    const input = upload(); input.id = '_r_dl_';
+    const video = document.createElement('input'); video.type = 'file'; video.accept = 'image/*,video/*';
+    document.querySelector('form')!.append(video);
+    document.execCommand = command => { if (command === 'delete') box.replaceChildren(); return true; };
+    const draft = api.captureComposerDraft('Exact app prompt');
+    input.addEventListener('change', () => {
+      const shelf = document.createElement('div'); shelf.setAttribute('data-composer-attachments', '');
+      shelf.innerHTML = '<div role="button" aria-label="app.webp"><img alt="app.webp"><button type="button" aria-label="app.webp ekini kaldır"></button></div>';
+      shelf.querySelector('button')!.addEventListener('click', () => shelf.remove());
+      document.querySelector('form')!.prepend(shelf);
+    });
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => true, draft)).toBe(true);
+    expect(input.files).toHaveLength(1);
+    expect(api.hasComposerAttachments()).toBe(true);
+    expect(await draft.clear()).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
+  });
   it('uploads original Markdown bytes and recognizes localized native file actions without duplicate tiles', async () => {
     const input = upload(); input.id = 'upload-files'; input.accept = '';
     const draft = api.captureComposerDraft('Exact app prompt');
