@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
-import { isFrameTitle, userTitle } from './title.js';
+import { userTitle } from './title.js';
 import type {
   ActivitySummary,
   AgentMessage,
@@ -559,9 +559,9 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
           lastTurnStartedAt = event.turnId ? turnStarts.get(event.turnId) ?? null : null;
         }
       } else if (event.kind === 'page_tool' && event.messageId) {
-        const held = pageTools.get(event.messageId);
+        const held = pageTools.get(pageToolKey(event.messageId));
         if (!held) {
-          pageTools.set(event.messageId, {
+          pageTools.set(pageToolKey(event.messageId), {
             seq: event.origin ?? event.seq,
             time: event.time,
             updatedAt: event.time,
@@ -637,6 +637,8 @@ export function liveConversations(): Array<{
   sessionId: string;
   generating: boolean;
   activeTurnId: string | null;
+  /** When the active turn was opened (its durable turn_start time); null while none is. */
+  activeTurnStartedAt: number | null;
   /**
    * How many turns of this chat have finished. Only ever goes up, for the life of the entry.
    *
@@ -656,6 +658,7 @@ export function liveConversations(): Array<{
     sessionId: entry.sessionId,
     generating: entry.turnStartedAt !== null,
     activeTurnId: entry.turnStartedAt !== null ? entry.turnId : null,
+    activeTurnStartedAt: entry.turnStartedAt,
     endedTurns: entry.knownTurnEnds.size,
     lastTurnOutcome: entry.lastTurnOutcome
   }));
@@ -1619,12 +1622,6 @@ export function setCallAttributionListener(
   attributionListener = listen;
 }
 
-let recordedUserMessageListener: ((sessionId: string) => void) | null = null;
-/** Set at startup so the input owner can reconcile an opening whose page receipt was lost. */
-export function setRecordedUserMessageListener(listen: ((sessionId: string) => void) | null): void {
-  recordedUserMessageListener = listen;
-}
-
 /** Set by the agent broker, for the deferred prime binding in recordToolCall. */
 export function setAgentBinder(bind: (agent: string, conversationId: string) => void): void {
   agentBinder = bind;
@@ -1865,6 +1862,18 @@ async function recordNativeImage(
  * a third. One recorded session held fifty-four `page_tool` events for what the page had
  * shown as roughly a dozen steps.
  */
+/**
+ * One native thought row under either of ChatGPT's two renderers. The older one keys its row
+ * `thought-<message id>-<item>`; the newer shell names the thought message itself. The same
+ * row re-reported after that switch must stay the same row, not become new work: measured
+ * 2026-09-26, a worker chat reopened across the switch replayed three day-old rows as fresh
+ * output and closed its own wake without the wake ever being typed.
+ */
+function pageToolKey(id: string): string {
+  const match = /^thought-(.+)-0$/.exec(id);
+  return match ? match[1]! : id;
+}
+
 async function recordPageTool(
   sessionId: string,
   live: LiveConversation | undefined,
@@ -1879,7 +1888,7 @@ async function recordPageTool(
     return true;
   }
 
-  const held = live.pageTools.get(id);
+  const held = live.pageTools.get(pageToolKey(id));
   if (held && held.text === label) return false;
 
   const event = await appendEvent(sessionId, {
@@ -1892,7 +1901,7 @@ async function recordPageTool(
     ...(held?.contentSeq !== undefined ? { contentSeq: held.contentSeq } : item.activeNow === false && !held ? { contentSeq: 0 } : {}),
     ...(held ? { origin: held.seq } : {})
   });
-  live.pageTools.set(id, {
+  live.pageTools.set(pageToolKey(id), {
     seq: held ? held.seq : event.seq,
     time: held ? held.time : base.time,
     updatedAt: base.time,
@@ -1910,7 +1919,7 @@ function observedUserTitle(first?: string): string | undefined {
 }
 
 function observationTitle(observations: readonly ChatObservation[]): string | undefined {
-  const title = observations.find((item) => item.kind === 'conversation_title' && !isFrameTitle(item.text))?.text?.trim();
+  const title = observations.find((item) => item.kind === 'conversation_title')?.text?.trim();
   const first = observations.find((item) => item.kind === 'user_message')?.text;
   return title || observedUserTitle(first);
 }
@@ -2079,7 +2088,7 @@ async function recordChatObservationsNow(
   // an intermediate array for every batch).
   for (const item of observations) {
     if (!firstUser && item.kind === 'user_message') firstUser = item;
-    if (item.kind === 'conversation_title' && !isFrameTitle(item.text)) pageTitle = item;
+    if (item.kind === 'conversation_title') pageTitle = item;
     if (item.kind === 'turn_start' && item.turnId) batchTurnStarts.set(item.turnId, item.time);
     if (item.kind === 'turn_end' && item.turnId) {
       explicitEnds.add(item.turnId);
@@ -2132,9 +2141,6 @@ async function recordChatObservationsNow(
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
-        // Outside this batch: the input owner reads the flushed transcript itself.
-        const listener = recordedUserMessageListener;
-        if (listener) setTimeout(() => listener(sessionId), 0);
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
           activity.working = true;
@@ -2259,7 +2265,7 @@ async function recordChatObservationsNow(
         continue;
       }
       case 'page_tool': {
-        const newlyObserved = !!live && !!item.messageId && !live.pageTools.has(item.messageId);
+        const newlyObserved = !!live && !!item.messageId && !live.pageTools.has(pageToolKey(item.messageId));
         const written = await recordPageTool(sessionId, live, item, base);
         if (!written) continue;
         if (newlyObserved && item.activeNow !== false && item.turnId && await reopenThinkingFailure(sessionId, live, item.time, item.turnId)) {

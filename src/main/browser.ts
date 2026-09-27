@@ -30,17 +30,7 @@ export async function isPreferredBrowserRunning(
         : browser === 'brave'
           ? /^(?:brave|brave-browser(?:-(?:stable|beta|dev|nightly))?|Brave Browser(?: Beta| Dev| Nightly)?(?: Helper.*)?)$/i
         : /^(?:chrome|google-chrome(?:-(?:stable|beta|unstable))?|chromium(?:-browser)?|Google Chrome(?: Beta| Dev| Canary)?(?: Helper.*)?|Chromium(?: Helper.*)?)$/i;
-      if (!result.stdout.split('\n').some(name => family.test(path.posix.basename(name.trim())))) return false;
-      // A headless/automation instance (Puppeteer, DevTools MCP) shares the executable name but can
-      // never host the companion. Counting it made sends wait forever instead of launching Chrome.
-      // Only this family's main processes are inspected, for these flags alone; nothing is kept.
-      const detail = await command('ps', ['-A', '-o', 'args='], os.tmpdir(), 5000);
-      if (detail.timedOut || detail.truncated || detail.exitCode !== 0 || !detail.stdout.trim()) return null;
-      return detail.stdout.split('\n').some(line => {
-        const executable = line.trim().split(/\s+--/, 1)[0] ?? '';
-        if (!family.test(path.posix.basename(executable)) || / --type=/.test(line)) return false;
-        return !/ --(?:headless|enable-automation)(?:[=\s]|$)/.test(line);
-      });
+      return result.stdout.split('\n').some(name => family.test(path.posix.basename(name.trim())));
     }
     if (browser === 'search') return null;
     // Probe only the selected family; another browser cannot prove its presence or absence.
@@ -274,11 +264,6 @@ export async function openInPreferredBrowser(
         // the owned helper tab, not this wrapper, keeps the browser alive.
         const result = await (options.powershell ?? runPowerShell)(script, cwd, 10_000);
         if (result.timedOut || result.exitCode !== 0) throw new Error(`Background browser launch failed: ${result.stderr.slice(0, 300) || 'PowerShell did not complete'}`);
-      }
-      else if (options.backgroundStartup && platform === 'darwin' && /\.app\/Contents\/MacOS\/[^/]+$/.test(browser)) {
-        // Executing the bundle binary always activates it. LaunchServices' -g starts the same
-        // app without bringing it forward; --args reaches only this newly started process.
-        await launch('/usr/bin/open', ['-g', '-a', browser.replace(/\/Contents\/MacOS\/[^/]+$/, ''), '--args', ...args], cwd);
       }
       else await launch(browser, args, cwd);
       return browser;

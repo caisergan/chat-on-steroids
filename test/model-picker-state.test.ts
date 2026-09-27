@@ -40,24 +40,6 @@ it('switches the observed Work surface to Chat once without relying on translate
   expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
   expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
 });
-it.each(['work', 'chat', 'two-groups', 'revoked'])('switches the 2026-09 unlabeled mode group to Chat by composer evidence (%s)', async kind => {
-  // Observed Work page: form[data-thread-find-composer] without data-chatgpt-composer; captions are translated.
-  const group = '<div role="group" aria-label="Mode"><button type="button" aria-pressed="false">Sohbet</button><button type="button" aria-pressed="true">Çalışma</button></div>';
-  page = new JSDOM(`${group}${kind === 'two-groups' ? group : ''}<form data-composer-placement="home" data-thread-find-composer="true"${kind === 'chat' ? ' data-chatgpt-composer=""' : ''}>` +
-    '<div contenteditable="true" role="textbox" data-composer-markdown></div></form>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
-  Object.defineProperty(page.window.HTMLElement.prototype, 'getClientRects', { value: () => [{}] });
-  page.window.eval(domSource);
-  const doc = page.window.document, [chat, work] = [...doc.querySelectorAll('button')];
-  const click = vi.fn(() => {
-    chat!.setAttribute('aria-pressed', 'true'); work!.setAttribute('aria-pressed', 'false');
-    doc.querySelector('form')!.setAttribute('data-chatgpt-composer', '');
-  });
-  chat!.addEventListener('click', click);
-  const api = (page.window as any).CLF_DOM;
-  const result = await api.prepareChatModelSurface(kind === 'revoked' ? () => false : undefined);
-  expect(result).toBe(kind === 'work' || kind === 'chat');
-  expect(click).toHaveBeenCalledTimes(kind === 'work' ? 1 : 0);
-});
 function fixture(versionCaption = '', closeDelay: number | null = 0) {
   page = new JSDOM('<form><div id="prompt-textarea" contenteditable="true"></div><div data-testid="composer-trailing-actions"><button type="button" aria-haspopup="menu">Denkaufwand</button><button data-testid="send-button">Senden</button></div></form>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
   const win = page.window, doc = win.document;
@@ -148,6 +130,28 @@ it.each([false, true])('releases native hidden-window Presence and reopens a ret
   expect(doc.querySelector('[role="menu"]')).toBeNull();
   expect([...doc.querySelectorAll('style')]).toEqual([nativeStyle]);
 });
+/**
+ * An effort the account no longer offers resolves to the nearest one it does.
+ *
+ * ChatGPT's newer picker replaced its effort ladder: measured on 2026-09-26, the thinking models
+ * offer `medium`, `high` and `max`, and `xhigh` is gone. A saved `multiAgent.defaultReasoning = xhigh`
+ * therefore matched nothing and every worker spawn failed outright — three in one homelab run.
+ *
+ * Nearest by position in the vocabulary, ties upward. Here the model offers `low` and `ultra`:
+ * `xhigh` sits two steps below `ultra` and three above `low`, so it lands on `ultra`; `medium` sits
+ * one step above `low`, so it lands there. A model the account does not offer still refuses —
+ * choosing a different model is not a rounding decision.
+ */
+it.each([['xhigh', 11], ['medium', 10]] as const)('selects the nearest offered effort when %s is not offered', async (effort, bucket) => {
+  const f = fixture('', 0);
+  expect(await f.api.selectModelSettings('future-model', effort), `${effort} refused instead of rounded`).toBe(true);
+  expect(f.state.currentBucket).toBe(bucket);
+});
+it('still refuses a model the account does not offer, whatever the effort', async () => {
+  const f = fixture('', 0);
+  expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);
+});
+
 it('refuses selection success when the picker retains its focus trap', async () => {
   const f = fixture('', null);
   expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);

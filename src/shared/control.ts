@@ -29,7 +29,6 @@ export type TaskState = 'queued' | 'sending' | 'working' | 'stalled' | 'done' | 
 
 export const TERMINAL_TASK_STATES: readonly TaskState[] = ['done', 'failed', 'cancelled'];
 
-/** Same threshold the queue's "waiting behind a stalled turn" notice uses. */
 export const STALLED_TURN_MS = 10 * 60_000;
 
 export interface TaskView {

@@ -17,6 +17,7 @@ import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, initSessionStore } from './session/store.js';
 import { initSkillsPath } from './skills.js';
 import { usageOverview } from './session/usage.js';
@@ -24,10 +25,8 @@ import {
   flushRecorder,
   queueDeterministicAttributionRepair,
   setAgentBinder,
-  setAgentConversationLookup,
-  setRecordedUserMessageListener
+  setAgentConversationLookup
 } from './session/recorder.js';
-import { acknowledgeRecordedOpening, acknowledgeRecordedOpenings } from './session/input.js';
 import {
   agentConversation,
   bindConversation,
@@ -238,6 +237,22 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   notice.show();
   return true;
 });
+setStuckNotifier((title, body, sessionId) => {
+  // A person looking at the app already has the timeline note this accompanies; interrupting
+  // them with the same sentence is noise, exactly as the finish notice treats a focused window.
+  if (window?.isFocused() || !Notification.isSupported()) return false;
+  const notice = new Notification({ title, body });
+  notice.on('click', () => {
+    showWindow();
+    if (!window) return;
+    const target = window.webContents;
+    const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
+    if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
+  });
+  notice.show();
+  return true;
+});
+
 setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 
 // Electron promises `second-instance` only after its own `ready`, not after our async startup.
@@ -343,9 +358,6 @@ void app.whenReady().then(async () => {
   // The prime's chat is the user's own, so no extension report can name it. It is bound
   // when the recorder manages to place the prime's first call. See recordToolCall.
   setAgentBinder(bindConversation);
-  // A fresh chat whose page lost its Send receipt is reconciled from the recorded message.
-  setRecordedUserMessageListener(sessionId => void acknowledgeRecordedOpening(sessionId).catch(() => false));
-  void acknowledgeRecordedOpenings().catch(() => undefined);
   // Before anything can call an agent tool, and before a run is restored: the broker
   // decides whether a previous run has been abandoned partly from which ChatGPT tabs are
   // open, and without this it can only answer "I cannot see" — which it treats, on

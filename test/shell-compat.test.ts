@@ -18,7 +18,7 @@ const OTHER = '55555555-5555-4555-8555-555555555555';
 let page: JSDOM;
 afterEach(() => page?.window.close());
 
-function fixture(composerForm = 'data-chatgpt-composer') {
+function fixture() {
   page = new JSDOM(`<div id="root"><aside id="app-shell-sidebar"></aside><main data-app-shell-main-surface>
     <div data-thread-find-target="conversation"><div data-turn-key="${USER}"><div data-content-search-turn-key="${TURN}">
       <div data-content-search-unit-key="${TURN}:0:user"><div data-user-message-bubble><div class="whitespace-pre-wrap">hello</div></div></div>
@@ -26,7 +26,7 @@ function fixture(composerForm = 'data-chatgpt-composer') {
         <div data-markdown-text-style="assistant-message">Commentary without a provider message id</div></div>
       <div data-content-search-unit-key="${TURN}:2:assistant"><div data-markdown-text-style="assistant-message">Answer</div></div>
     </div></div></div>
-    <form ${composerForm}><div data-composer-body><div contenteditable="true" role="textbox" data-composer-markdown><p><br></p></div>
+    <form data-chatgpt-composer><div data-composer-body><div contenteditable="true" role="textbox" data-composer-markdown><p><br></p></div>
       <button type="button" data-composer-navigation-target="add-context">+</button>
       <button type="button" aria-haspopup="menu" data-codex-intelligence-trigger="true" data-composer-navigation-target="reasoning" data-selected-reasoning-effort="medium">Mittel</button>
       <button type="submit" aria-label="Senden">Senden</button>
@@ -372,19 +372,6 @@ it('holds provisional shell request metadata until this document owns the native
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 });
 
-it('finds live shell request ids in the observed large compiler memo cache', async () => {
-  // Work-mode owner shape from a live page: 443 hooks and 41 memo slots, snapshot in the first.
-  const f = fixture(), { owner, snapshot } = liveShellMapping(f, true);
-  const filler = (n: number) => Array.from({ length: n }, (_, i) => ({ slot: i }));
-  owner.updateQueue.memoCache.data = [[...filler(444), snapshot], ...Array.from({ length: 40 }, () => filler(4))];
-  let hook: any = null;
-  for (let at = 0; at < 443; at++) hook = { memoizedState: { slot: at }, next: hook };
-  owner.memoizedState = hook;
-  const turn = (await f.ask()).turns[0];
-  expect(turn.calls[0]).toMatchObject({ messageId: CALL, requestId: OTHER });
-  expect(turn.requests.map((request: any) => request.requestId)).toContain(OTHER);
-});
-
 it.each(['live', 'history', 'wrong-recipient', 'unselected', 'duplicate'])
   ('reads the mounted native Code Mode invocation metadata without its result body (%s)', async state => {
     const f = fixture(), { mapping } = liveShellMapping(f, true);
@@ -620,6 +607,166 @@ it('uses typed running state rather than a translated Stop caption', async () =>
   await f.ask(); expect(f.api.generating()).toBe(true); expect(f.api.composerSubmitReady()).toBe(false);
   expect(f.api.stopButton()).toBeNull(); // No guessed action target.
 });
+/**
+ * Stop, on a composer that says it in another language.
+ *
+ * The newer composer puts voice, send and stop in one slot as the same `type="button"`; only the
+ * label and the icon change, and the label is translated. Captured from a Turkish page on
+ * 2026-09-25: `aria-label="Durdur"` while streaming, `aria-label="Sesli iletisimi baslat"` when
+ * idle. With only an English label list to go on, stop was never found — so `generating()` said
+ * no while a reply was streaming, and nothing could end the turn through the page.
+ *
+ * The square is the part nobody translates. The dictation control in the same slot draws four
+ * paths and carries `data-state`; this asserts both directions, because a send or voice button
+ * mistaken for stop would report a generation that never ends.
+ */
+it('finds the stop control by its square when the label is translated', () => {
+  const f = fixture();
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot} relative" aria-label="Sesli iletisimi baslat" data-state="closed">` +
+    '<svg aria-hidden="true" class="icon-primary-action"><path d="M10 2.5v6"></path><path d="M6 6v2"></path>' +
+    '<path d="M14 6v2"></path><path d="M10 12v5"></path></svg></button>');
+  expect(f.api.generating(), 'the dictation control was read as stop').toBe(false);
+  expect(f.api.stopButton()).toBeNull();
+
+  form.querySelector('button[aria-label="Sesli iletisimi baslat"]')!.outerHTML =
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+  expect(f.api.generating(), 'a translated stop button was not recognised').toBe(true);
+  expect(f.api.stopButton()?.getAttribute('aria-label')).toBe('Durdur');
+});
+
+/**
+ * Send, on the same composer, in another language.
+ *
+ * All three `SEND` strategies fail on the newer composer: the `data-testid` is gone, nothing in
+ * that slot is `type="submit"` any more, and `aria-label^="Send"` is translated. `submitDraft`
+ * waits on `sendButton()` and deliberately has no Enter fallback, so when it finds nothing the
+ * prompt simply stands in the composer for ever. Reported in #415 on an English install — "opens
+ * a new GPT web tab and doesnt send any messages" — and captured on a Turkish page in #393.
+ *
+ * Send has no icon signature worth trusting, so it is identified by the state it is the only
+ * occupant of: text in the composer and nothing generating. Both other tenants of the slot are
+ * asserted here to stay out of it, because a dictation button clicked as send starts a recording
+ * and a stop square clicked as send ends somebody's turn.
+ */
+/**
+ * A turn React still calls `in_progress`, hours after it died.
+ *
+ * `generating()` falls back to `data-clf-shell-running`, which fiber.js stamps from
+ * `shell.entry.turn.status === 'in_progress'`. That status outlives an interrupted exchange, and the
+ * existing guard — trust only the newest turn, and only for this pathname — does not help when the
+ * newest turn *is* the interrupted one.
+ *
+ * Measured on the live page on 2026-09-26 over the Chrome debugging port, in the chat this was found
+ * in: all three shell turns carried the stamp for the current pathname at once, `stopButton()` was
+ * null, and `generating()` said true. Three turns cannot be running. The consequence ran the whole
+ * night: `nowGenerating` never went false, so the observer's outcome branch — the only path that can
+ * end a turn — was unreachable, the turn stayed open for nine hours, and the compaction handoff and
+ * every queued follow-up behind it were blocked on it.
+ *
+ * The composer settles it without a label or a clock: voice, send and stop are one button in one slot
+ * on this shell, so a slot holding anything but the stop square is a page that is not generating.
+ */
+/**
+ * A turn identified by the key that is an identity, not by its position.
+ *
+ * `data-content-search-turn-key` belongs to the search index, and on the current shell it has
+ * degraded to a position. Measured on the live page on 2026-09-26 over the debugging port: three
+ * consecutive exchanges carried `fallback-turn-0`, `fallback-turn-1` and `fallback-turn-2`, while
+ * their own `data-turn-key` held real UUIDs — the same UUIDs `messages()` reported for those turns'
+ * user items.
+ *
+ * A position is not an identity. It renumbers when history virtualizes or an exchange is inserted,
+ * so every join keyed on it moves to a different turn without anything looking wrong.
+ */
+it('identifies a shell turn by data-turn-key when the search key is only a position', () => {
+  const f = fixture();
+  const native = f.doc.querySelector('[data-turn-key]')!;
+  const real = native.getAttribute('data-turn-key')!;
+  expect(real, 'the fixture has no turn key to prefer').toMatch(/^[0-9a-f-]{36}$/);
+
+  // The shell as it actually ships: the search key is a position.
+  native.querySelector('[data-content-search-turn-key]')!.setAttribute('data-content-search-turn-key', 'fallback-turn-0');
+  const shell = f.api.turns().filter((turn: any) => turn.id);
+  expect(shell.length, 'no shell turn was read at all').toBeGreaterThan(0);
+  expect([...new Set(shell.map((turn: any) => turn.id))],
+    'a positional search key was used as the turn identity').toEqual([real]);
+
+  // And the search key stays the fallback for the other direction: a shell whose *turn* key is the
+  // positional one and whose search key is real. `data-turn-key` cannot simply be dropped to test
+  // this — SHELL_TURN selects on it, so a node without it is not a shell turn at all.
+  native.setAttribute('data-turn-key', 'fallback-turn-3');
+  native.querySelector('[data-content-search-turn-key]')!.setAttribute('data-content-search-turn-key', 'a-real-search-key');
+  expect(f.api.turns().filter((turn: any) => turn.id).map((turn: any) => turn.id),
+    'the search key stopped being a fallback').toContain('a-real-search-key');
+});
+
+it('does not call a page generating when its composer offers voice, whatever React still says', () => {
+  const f = fixture();
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+
+  // Every shell turn stamped as running, exactly as the live page had it.
+  const turns = [...f.doc.querySelectorAll('[data-app-shell-main-surface] [data-thread-find-target="conversation"] [data-turn-key]')];
+  expect(turns.length, 'the fixture has no shell turns to stamp').toBeGreaterThan(0);
+  for (const turn of turns) turn.setAttribute('data-clf-shell-running', f.win.location.pathname);
+  expect(f.api.generating(), 'the stamp alone stopped meaning anything').toBe(true);
+
+  // The slot holds dictation: the composer is idle, so the page is not generating.
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot} relative" aria-label="Sprachchat starten" data-state="closed">` +
+    '<svg aria-hidden="true" class="icon-primary-action"><path d="M8.22266 2.45825C8"></path><path d="M12.4443 4.62524C1"></path>' +
+    '<path d="M4 6.95825C4.48325"></path><path d="M16.667 7.45825C17"></path></svg></button>');
+  expect(f.api.generating(), 'a composer offering voice was still called generating').toBe(false);
+  expect(f.api.stopButton()).toBeNull();
+
+  // And the stop square in that same slot still means generating, stamp and all.
+  form.querySelector('button[aria-label="Sprachchat starten"]')!.outerHTML =
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+  expect(f.api.generating(), 'a stop control stopped proving a live generation').toBe(true);
+});
+
+it('finds the send control by its slot when the label is translated', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  // The newer composer has none of the three things SEND looks for.
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.sendButton(), 'a composer with no send control offered one anyway').toBeNull();
+
+  // Empty composer: this slot is dictation, and it is not a send target.
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot} relative" aria-label="Sesli iletisimi baslat" data-state="closed">` +
+    '<svg aria-hidden="true" class="icon-primary-action"><path d="M10 2.5v6"></path><path d="M6 6v2"></path>' +
+    '<path d="M14 6v2"></path><path d="M10 12v5"></path></svg></button>');
+  expect(f.api.sendButton(), 'the dictation control was read as send').toBeNull();
+
+  // Text typed, and the slot now holds send with a translated label and an arrow.
+  form.querySelector('button[data-state="closed"]')!.remove();
+  expect(f.api.insertPrompt('Devam et', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Devam et');
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>');
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was not recognised').toBe('Gönder');
+
+  // The stop square in that same slot is never a send target.
+  form.querySelector('button[aria-label="Gönder"]')!.outerHTML =
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+  expect(f.api.sendButton(), 'the stop square was read as send').toBeNull();
+
+  // And an English label still wins outright, without consulting the slot at all.
+  form.querySelector('button[aria-label="Durdur"]')!.outerHTML =
+    '<button type="button" aria-label="Send prompt">send</button>';
+  expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Send prompt');
+});
+
 it('preserves prepared multiline text through the shell editor serializer', () => {
   const f = fixture(), edit = editing(f);
   const value = '[[COS_CONTEXT:42]]\n# Worker instructions\n- Keep **literal** text, C:\\work and `<tag>`.\n[[/COS_CONTEXT]]\n\nContinue the task.';
@@ -627,17 +774,6 @@ it('preserves prepared multiline text through the shell editor serializer', () =
   expect(edit.serialize()).toBe(value);
   expect(f.doc.execCommand).toHaveBeenCalledOnce();
   expect(edit.box.querySelector('tag')).toBeNull();
-});
-it('accepts the renamed home composer form and its literal-paste editor', () => {
-  // Observed Work-mode home page: the form lost data-chatgpt-composer.
-  const f = fixture('class="relative flex flex-col gap-2" data-composer-placement="home" data-thread-find-composer="true"');
-  const box = f.doc.querySelector('[contenteditable]');
-  expect(f.api.composer()).toBe(box);
-  expect(f.api.composerVisible()).toBe(true);
-  expect(f.api.composerWritable()).toBe(true);
-  const edit = editing(f), value = 'Keep **literal** text\nand C:\\work.';
-  expect(f.api.insertPrompt(value, true)).toBe(true);
-  expect(edit.serialize()).toBe(value);
 });
 it('hides only a verified shell prompt frame and restores a recycled user bubble', async () => {
   const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;
@@ -656,6 +792,26 @@ it('hides only a verified shell prompt frame and restores a recycled user bubble
   expect(unit.querySelector('[data-clf-user-text]')).toBeNull();
   expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(false);
 });
+/**
+ * The same frame, as the composer gives it back.
+ *
+ * Reported as #374: the internal instructions stayed visible in the page and in ChatGPT's own
+ * conversation title. The editor escapes what it is handed — a backslash before ASCII
+ * punctuation, and one before a newline — so the frame this reader looks for matched nothing and
+ * the whole thing was left on screen as if the user had typed it.
+ */
+it('hides a prompt frame the composer escaped on readback', async () => {
+  const f = fixture(), unit = f.doc.querySelector('[data-content-search-unit-key$=":user"]')!;
+  const raw = unit.querySelector('.whitespace-pre-wrap')!;
+  const full = '[[COS_CONTEXT:13]]\nPrivate setup\n[[/COS_CONTEXT]]\n\nAuthored request';
+  const escaped = full.replace(/([!-/:-@[-`{-~])/g, '\\$1').replace(/\n/g, '\\\n');
+  f.entry.turn.items[0].message = escaped; raw.textContent = escaped;
+  await f.ask();
+  f.api.presentUserPrompts((message: { id: string }) => message.id === USER ? escaped : null);
+  expect(unit.querySelector('[data-clf-user-text]')?.textContent).toBe('Authored request');
+  expect(raw.hasAttribute('data-clf-prompt-hidden')).toBe(true);
+});
+
 it('delivers three successive shell inputs with exact receipts and completed answers', async () => {
   const f = fixture(), edit = editing(f);
   f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
@@ -682,28 +838,6 @@ it('delivers three successive shell inputs with exact receipts and completed ans
   }
   expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
   expect(r.events().filter((e: any) => e.kind === 'turn_end' && e.outcome === 'completed')).toHaveLength(3);
-  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
-}, 15000);
-it('acknowledges an input that ChatGPT stored as escaped Markdown because it contains a relative link', async () => {
-  // 2026-09-25: `tools[name](args)` / `[a](b)` switch the native message to renderMarkdown.
-  const markdownReadback = (value: string) => value.replace(/[\\`*_#[\]()!]/g, '\\$&')
-    .replace(/ +$/gm, match => '&#x20;'.repeat(match.length)).replace(/\n/g, '\\\n');
-  const f = fixture(), edit = editing(f);
-  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
-  let latest: ReturnType<typeof addExchange> | undefined;
-  const text = '# Plan\nCall tools[name](args) and see [notes](docs/notes.md).  \nKeep C:\\work **literal**.';
-  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
-    event.preventDefault(); latest = addExchange(f, 1, markdownReadback(edit.serialize())); edit.box.replaceChildren();
-  });
-  const offered = { id: '88888888-1111-4111-8111-000000000009', owner: 'owner-md', text,
-    model: 'gpt-5-6-thinking', reasoningEffort: 'high', purpose: 'user', images: [] };
-  const r = await recorder(f, { desktop_input: m => ({ ok: true, data: m.authorize || m.ack || m.fail ? { ok: true } : { input: offered } }) });
-  const pending = r.runtime({ type: 'clf-desktop-input', id: offered.id, conversationId: THREAD });
-  await vi.waitFor(() => expect(latest).toBeDefined(), { timeout: 5000 });
-  await r.hook.refreshFiber(); r.hook.observe();
-  expect(await pending).toEqual({ ok: true });
-  expect(r.sent.filter(m => m.type === 'desktop_input' && m.ack && m.id === offered.id)).toHaveLength(1);
-  expect(r.sent.filter(m => m.type === 'desktop_input' && m.fail)).toEqual([]);
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 }, 15000);
 it.each([false, true])('bootstraps a shell worker with literal instructions and the exact native conversation (cold=%s)', async cold => {
@@ -942,6 +1076,18 @@ it('discovers both native versions, selects exact worker lanes and restores the 
   expect(await f.api.selectModelSettings('future-pro', 'high')).toBe(false);
   expect(f.doc.querySelector('[data-model-picker-view]')).toBeNull();
   expect(f.api.visibleModelSelection()).toEqual({ model: 'future-pro', reasoningEffort: 'pro' });
+});
+it('maps native lane labels over transport effort values (Pro/Extra High lanes)', async () => {
+  const f = fixture();
+  // The live Pro and Extra High lanes report medium/max as transport reasoningEffort;
+  // the picker's own lane label is the offered effort identity.
+  Object.assign(f.selections[0]![0]!, { reasoningEffort: 'medium', sliderLabel: 'Pro', labels: { effort: 'Pro' } });
+  Object.assign(f.selections[0]![1]!, { reasoningEffort: 'max', sliderLabel: 'Extra High', labels: { effort: 'Extra High' } });
+  const models = await f.api.inspectModelSettings();
+  expect(models.find((m: any) => m.id === 'gpt-5-6-thinking')?.efforts).toEqual(['pro', 'xhigh']);
+  expect(models.find((m: any) => m.id === 'future-pro')?.efforts).toEqual(['pro']);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
 });
 it.each([false, true])('rechecks the cold shell picker owner when its account state hydrates (cancelled=%s)', async cancelled => {
   const f = fixture(), options = f.props.modelListConfig;
