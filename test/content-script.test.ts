@@ -1156,6 +1156,29 @@ describe('desktop input delivery and helper ownership', () => {
     ]);
   });
 
+  /**
+   * After a hard break the shell also stores an indented line's first space as the HTML entity
+   * `&#x20;`. Measured 2026-09-27: two app-started chats whose brief carried an indented list read
+   * back `Rules:\\\n&#x20; \\- Run only…`, so neither send was ever acknowledged.
+   */
+  it('ACKs a fresh input whose indented lines the page stores as space entities', async () => {
+    const typed = '[[COS_CONTEXT:1]]\nRules:\n  - Run only the file you changed\n  - Never run the suite';
+    const stored = '[[COS_CONTEXT:1]]\\\nRules:\\\n&#x20; \\- Run only the file you changed\\\n&#x20; \\- Never run the suite';
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack ? { ok: true } : { input: claimed({ text: typed }) } })
+    });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'entity-desktop-user', stored);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: true });
+    expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toEqual([
+      expect.objectContaining({ id: inputId, owner: 'input-owner', conversationId: chatA, ack: true })
+    ]);
+  });
+
   it.each([false, true])('carries a reserved opening into route binding before activity (project: %s)', async project => {
     live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
       events: () => ({ ok: false }),
