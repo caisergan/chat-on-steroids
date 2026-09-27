@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 
-const { cfg, sendDesktopInput, ready, store, listInputs } = vi.hoisted(() => ({
+const { cfg, sendDesktopInput, ready, store, listInputs, sessionInputPolicy } = vi.hoisted(() => ({
   ready: vi.fn(async () => undefined),
+  sessionInputPolicy: vi.fn(async (_id: string) => ({ browserAllowed: true })),
   cfg: { ui: { cliControl: true } },
   sendDesktopInput: vi.fn(async (input: { id: string; sessionId: string | null }) => ({ id: input.id, sessionId: input.sessionId ?? input.id })),
   listInputs: vi.fn(async () => [] as any[]),
@@ -28,7 +29,7 @@ vi.mock('../src/main/logger', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 vi.mock('../src/main/chat-models', () => ({ getChatModels: () => ({ state: 'ready', requestedAt: 1, observedAt: 2, models: [{ id: 'gpt-5-6', label: 'GPT-5.6', efforts: ['low', 'high'], aliases: ['x'] }] }) }));
 vi.mock('../src/main/projects', () => ({ listProjects: async () => [{ id: '11111111-1111-4111-8111-111111111111', name: 'Paseo', path: '/p' }] }));
 vi.mock('../src/main/session/store', () => store);
-vi.mock('../src/main/session/input', () => ({ listInputs }));
+vi.mock('../src/main/session/input', () => ({ listInputs, sessionInputPolicy }));
 vi.mock('../src/main/session/start-input', () => ({ sendDesktopInput, ready, cancelDesktopInput: async () => false }));
 
 import { applyControlSetting, controlEndpoint, initControl } from '../src/main/control';
@@ -46,6 +47,7 @@ beforeEach(async () => {
   dir = mkdtempSync(path.join(os.tmpdir(), 'cos-')); initControl(dir); cfg.ui.cliControl = true;
   sendDesktopInput.mockClear();
   listInputs.mockResolvedValue([]);
+  sessionInputPolicy.mockResolvedValue({ browserAllowed: true });
   store.getSession.mockResolvedValue(null); store.listSessionPage.mockResolvedValue({ sessions: [] });
   store.readRecentEvents.mockResolvedValue([]); store.readOverflowText.mockResolvedValue(null);
   await applyControlSetting();
@@ -167,6 +169,23 @@ describe('orchestration routes', () => {
     ]);
     const { json } = await request('GET', 'tasks?active=1', token());
     expect(json.map((r: any) => r.taskId)).toEqual(['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
+  });
+
+  it('sends a follow-up to an idle chat at once', async () => {
+    // An after-turn row only fires on a turn that ends after it was queued, so an idle chat
+    // would hold it forever.
+    store.getSession.mockResolvedValue({ id: 's1abcdef', conversationId: 'c1', projectId: '11111111-1111-4111-8111-111111111111' });
+    const res = await request('POST', 'tasks', token(), { text: 'next step', session: 's1abcdef' });
+    expect(res.status).toBe(200);
+    expect(sendDesktopInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's1abcdef', mode: 'auto' }));
+  });
+
+  it('queues a follow-up behind a running turn instead of interrupting it', async () => {
+    store.getSession.mockResolvedValue({ id: 's1abcdef', conversationId: 'c1', activeTurnId: 't1' });
+    sessionInputPolicy.mockResolvedValue({ browserAllowed: false });
+    const res = await request('POST', 'tasks', token(), { text: 'next step', session: 's1abcdef' });
+    expect(res.status).toBe(200);
+    expect(sendDesktopInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's1abcdef', mode: 'after-turn' }));
   });
 
   it('steers a running turn through the outbox injection path', async () => {
