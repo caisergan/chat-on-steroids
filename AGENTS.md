@@ -772,12 +772,24 @@ and nested code-mode calls do not receive or acknowledge these automatic pages.
 
 `workspace-terminal.ts` and `workspace-terminal-ipc.ts` own human-operated node-pty shells;
 `renderer/workspace-terminal.ts` renders them with xterm and FitAddon. These shells are separate
-from MCP process custody and never consume agent output. The header button or Ctrl+backtick opens
-a resizable bottom panel. Each new tab captures the selected approved project's canonical cwd;
-changing chats does not retarget existing shells. No project means no guessed cwd. The live
-Command permission gates spawn/input, and input rechecks the original project path.
+from MCP process custody and never consume agent output. `renderer/workspace-docks.ts` places
+independent Terminal views in the right and bottom docks. The bottom header button and
+Ctrl+backtick toggle its dock; its first opening shows Terminal and starts a shell. When no
+project is selected, main chooses the OS user's home directory as the initial cwd; the renderer
+does not supply a path. Selecting a project later does not retarget that shell. The bottom
+header's X hides the dock but preserves its shells.
+The bottom `+` menu opens another bottom shell. On the right, each shell is one dock tab
+alongside Files, Review and Sub-agents; there is no nested Terminal tab bar. The right
+`+` menu creates a new shell tab, while the Terminal quick action/shortcut selects an
+existing right shell or creates one if none exists. Closing a right shell tab retires that
+exact PTY; hiding either dock preserves its PTYs. Closing the last bottom terminal tab
+also closes the bottom dock.
+Each new terminal tab captures the selected approved project's canonical cwd, or the main-owned
+home cwd when projectless; changing chats does not retarget existing shells. A selected project
+that fails resolution must not fall back to home. The live Command permission gates spawn/input,
+and input rechecks the original project path for project-bound tabs.
 
-Up to eight tabs retain interactive shell state. Hiding the panel preserves processes; closing
+Up to eight tabs across both docks retain interactive shell state. Hiding a panel preserves processes; closing
 a tab, renderer reload/destruction or app shutdown retires them. UUIDs and pending-create tickets
 prevent a late spawn after close. IPC accepts only the current main-frame sender and bounded
 named requests. Output pauses at 256 KiB until xterm parser acknowledgements drain it; scrollback
@@ -1816,9 +1828,14 @@ External navigation may hide its destination URL under ChatGPT-only host permiss
 A completed tab absent from a successful ChatGPT URL query can release the departed
 conversation only while its original document, epoch and terminal lease still agree.
 Loading alone and failed queries are not departure proof; replacement registration wins.
-Confirmed removal or navigation sends an explicit departure to the bridge. It suspends
+Confirmed user removal or navigation sends a manual departure to the bridge. It suspends
 automatic browser recovery, including silence, Goal/queue and compaction pickups. Exact local
 tool execution remains visible under its existing activity deadline independently of tab presence.
+Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
+document, navigation epoch and conversation in the existing session-storage snapshot. Its
+lifecycle event carries a non-manual departure through the close outbox; it does not create
+recovery authority. Main still requires eligible outstanding work. Failed removals and unknown
+origins remain conservative, and a later manual close supersedes a pending automatic departure.
 An unexpected lost/discarded page retains its existing recovery contract. A newer observation
 of the exact departed page clears the dismissal; unresolved work reuses its last exact MCP
 timestamp and normal deadline. A tab close never fabricates provider completion.
@@ -2771,6 +2788,10 @@ dragging or Alt+Up/Down moves a parent and its worker children within its curren
 unfiled group. A drag beyond the group clamps to its first/last visible slot; it cannot change
 project ownership. Pointer custody defers row replacement during live refresh and revalidates
 membership before saving. Off-page order survives partial list refreshes.
+The worker drawer is a read-only split view of the selected worker's own recorded conversation;
+opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
+current-conversation model and broker status when known, falling back to recorded session activity.
+Unknown models stay absent rather than borrowing a configured default.
 Whole project groups use the same bounded order owner in a separate scope. Dragging a
 project summary or pressing Alt+Up/Down moves the group without changing any chat's project;
 the summary handle keeps focus and disclosure state. Group order survives reload.
@@ -2784,6 +2805,11 @@ from appearing unread after an update, and the stored receipts stay bounded.
 The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.
+The timeline retains each exact tool row. It folds five or more consecutive successful agent
+status checks or waits on the same process inside the existing activity disclosure, preserving
+each row on expansion; a failed call breaks the fold. An immediately preceding recorded progress
+line may title that disclosure as the observed activity phase. Tool diff counts and shell/result
+headers are projections of recorded data, not new execution or completion evidence.
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button
@@ -2882,6 +2908,9 @@ six-digit RGB color. A shared font choice, 12–18px base text size and transluc
 apply immediately; Reset appearance restores both palettes and typography without changing the
 theme, language or setup profile. Text size scales the existing typography hierarchy, including
 code, independently of window zoom. System font retains the locale-specific fallback stack.
+The Appearance sample chat reflects the same semantic color and typography tokens immediately;
+it contains no session data. The composer context ring and compact count remain labeled as local
+estimates. Unverified saved model preferences show their status beside the model select.
 Readable foregrounds, secondary text, borders, status colors and accent labels derive from the
 chosen surfaces; sidebar text derives from its own color. Translucency is an in-window tinted
 gradient/blur, not transparency through the native window to other applications.
@@ -2910,13 +2939,48 @@ refresh complete or starts a browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. Files and the read-only sub-agent panel share one resizable work slot.
+and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
+bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
+and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
+The right dock has launcher shortcuts, tool tabs and a `+` tool menu. Its Files, Review,
+Sub-agents and Terminal actions open right tabs; repeated Terminal `+` actions add a shell there.
+With no tabs, the right dock shows only launcher shortcuts; its tab bar and `+` stay hidden.
+The `+` popover must receive real pointer input above any active tool header.
+The bottom dock has no generic shortcut screen or second tool tab strip; Terminal owns its own
+tabs and `+` menu there. Both `+` controls follow the last tab, not the far edge of the bar.
+Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
+does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
+dock. The top-right control group orders right expansion (shown only while right is open),
+bottom, then right; the latter two buttons toggle their panels. There is no separate right-dock
+close button. Layout controls grant no new file, terminal or worker authority.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
-Its outer toggle or Escape closes the pane; a selected worker retains its title and Back button.
+Its tab close or Escape closes the pane; a selected worker retains its title and Back button.
 Directories load one level at a time (500 entries); at most 128 expanded directory watches are
 retained. Collapse, panel hiding, renderer reload/destruction and root removal retire watchers.
-Files uses one action toolbar with Refresh; the outer Files toggle closes the panel. Its shared
+Files uses one action toolbar with Refresh; its tab close hides the panel. Its shared
 work slot can grow to host width minus 360 px for chat, without a fixed maximum pixel width.
+`src/main/project-git.ts` is the sole owner of the read-only Review projection. The renderer
+passes only a LocalProject UUID and project-relative path through fixed IPC; main re-resolves the
+approved project/root and Git metadata before reading status or a diff. Git inspection is strictly
+read-only: it strips inherited Git repository/index redirects, uses optional-lock-free bounded
+subprocesses and exposes no stage, commit, reset,
+checkout or push authority. Review projects `M/A/D/R/U`, ancestor-folder markers and
+bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
+tabs; Review does not add a second file watcher or expose file-write actions.
+Review also identifies the checked-out branch and offers a searchable, read-only comparison
+against locally known branch refs. Selecting a ref never switches branches or fetches remote
+data. The comparison shows committed changes from the selected ref's merge base to current
+HEAD, scoped to the Local Project; the existing Working tree view separately includes local
+uncommitted and untracked changes. Its list, line counts and file preview must share the same
+comparison identity, and a changed ref/HEAD cannot publish an old diff as current.
+A non-repository, binary file, oversized diff or truncated change set is an
+explicit state rather than a reason to invent content or mutate the worktree.
+
+An exact successful `apply_patch` may also retain a bounded immutable before/after review asset
+beside the session record. That historical review belongs to the recorded tool call, not to HEAD or
+the file's later contents, and it is retrieved only by session/call/change identity. Failed,
+inexact or oversized edits do not gain fabricated review evidence. Current Git Changes and recorded
+edit review therefore share a diff renderer but have separate truth owners.
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.
 The horizontal preview separator paints a one-pixel hover line with a three-pixel drag area.

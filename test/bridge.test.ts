@@ -61,6 +61,7 @@ const {
   pendingCommands,
   queueResume,
   resetBridgeForTests,
+  unattributedIncidentsSettledForTests,
   restoreCommands,
   resumeJobFor,
   setBrowserOpener,
@@ -1172,6 +1173,7 @@ describe('activity feed', () => {
       requestId,
       evidence: {
         changes: [],
+        reviews: [],
         assets: [],
         count: null,
         detail: null,
@@ -1385,6 +1387,7 @@ describe('activity feed', () => {
       requestId,
       evidence: {
         changes: [],
+        reviews: [],
         assets: [],
         count: null,
         detail: null,
@@ -1455,6 +1458,7 @@ describe('activity feed', () => {
       conversationId,
       evidence: {
         changes: [{ path: '/project/src/main.ts', added: 18, removed: 4, approximate: false }],
+        reviews: [],
         assets: [],
         count: null,
         detail: null,
@@ -1669,7 +1673,7 @@ describe('activity feed', () => {
         tool: 'exec_command', args: { command: `fixture-${outcome}` },
         content: [{ type: 'text', text: `result-${outcome}` }], outcome, durationMs: 3,
         startedAt: Date.now(), requestId: `wfr_enum_${outcome}`, conversationId,
-        evidence: { changes: [], assets: [], count: null, detail: null,
+        evidence: { changes: [], reviews: [], assets: [], count: null, detail: null,
           exitCode: outcome === 'process_exit_nonzero' ? 4 : null, timedOut: false,
           durationMs: null, running: null, processSessionId: null }
       });
@@ -2297,6 +2301,41 @@ describe('automatic compaction', () => {
           if (scenario === 'blocked') setChatBlocked(conversationId, false);
         }
       });
+    });
+
+  it.each(['image-first', 'end-first', 'missing-proof', 'wrong-image', 'stopped', 'unfinished-image'] as const)(
+    'releases input only for the exact completed native image (%s)', async scenario => {
+      await pair();
+      const conversationId = randomUUID(), messageId = randomUUID();
+      const opened = await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), messageId: randomUUID(), text: 'Generate an image.' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'image-turn' }
+      ] } });
+      const sessionId = opened.body.sessionId;
+      const image = { kind: 'native_image', time: Date.now(), turnId: 'image-turn', messageId,
+        providerAssetId: 'file_1234567890abcdef', providerRole: 'tool', providerChannel: 'final',
+        providerStatus: scenario === 'unfinished-image' ? 'in_progress' : 'finished_successfully', previewStatus: 'pending' };
+      const end = { kind: 'turn_end', time: Date.now(), turnId: 'image-turn',
+        outcome: scenario === 'stopped' ? 'stopped' : 'completed',
+        ...(scenario !== 'missing-proof' ? { providerMessageId: scenario === 'wrong-image' ? randomUUID() : messageId } : {}) };
+      const batch = async (event: unknown) => request('POST', '/events', { body: { conversationId, events: [event] } });
+      await batch(scenario === 'end-first' ? end : image);
+      expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBeNull();
+      await batch(scenario === 'end-first' ? image : end);
+      const complete = scenario === 'image-first' || scenario === 'end-first';
+      expect(!!await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBe(complete);
+      const { sessionInputActivity } = await import('../src/main/bridge.js');
+      const { sessionInputPolicy } = await import('../src/main/session/input.js');
+      if (complete) {
+        const activity = sessionInputActivity((await getSession(sessionId))!);
+        expect(activity).toMatchObject({ possible: false, exact: false });
+        expect(await sessionInputPolicy(sessionId, activity)).toMatchObject({ browserAllowed: true, settled: true });
+      }
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), messageId: randomUUID(), text: 'New question.' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'new-turn' }
+      ] } });
+      expect(await sessionStoreModule.readCompletedFinal(sessionId, conversationId)).toBeNull();
     });
 
   it.each(['expired', 'clock-back', 'auto-off', 'rebound'] as const)(
@@ -6717,9 +6756,15 @@ describe('unattributed activity recovery', () => {
     } finally { await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers(); }
   });
 
-  /** A finished call whose request id the page never confirmed. Files under Unattributed. */
-  function unattributed(requestId?: string): Promise<unknown> {
-    return recordToolCall({
+  /**
+   * A finished call whose request id the page never confirmed. Files under Unattributed.
+   *
+   * Resolves only after the incident it opened has read its candidates from disk and armed its
+   * due timer. Fake-clock steps do not wait for that real read; on a slow runner the clock could
+   * otherwise pass the due time before the timer existed, and nothing would ever fire it.
+   */
+  async function unattributed(requestId?: string): Promise<unknown> {
+    const recorded = await recordToolCall({
       tool: 'read',
       args: { paths: ['/project/whoever.ts'] },
       content: [{ type: 'text', text: 'ok' }],
@@ -6728,6 +6773,8 @@ describe('unattributed activity recovery', () => {
       startedAt: Date.now(),
       ...(requestId ? { requestId } : {})
     });
+    await unattributedIncidentsSettledForTests();
+    return recorded;
   }
 
   /** An unattributed call that names its server turn: the recorder waits out the evidence grace first. */
@@ -7361,11 +7408,7 @@ describe('unattributed activity recovery', () => {
       await pair(); await events(PRIME, [openTurn(`claim-${kind}`)]);
       const id = `claim-request-${kind}`;
       await unattributedTurn(id); await vi.advanceTimersByTimeAsync(15_000);
-      // The repair is due 15 s after the incident opens. On a slow Windows runner the recorder can
-      // open it a little after this test's clock step, so step on in small increments rather
-      // than failing on the first pass; what is asserted about the handed claim is unchanged.
-      let first = await maintenance();
-      for (let step = 0; !first && step < 8; step++) { await vi.advanceTimersByTimeAsync(5_000); first = await maintenance(); }
+      const first = await maintenance();
       expect(first?.reason).toBe('unattributed');
       await vi.advanceTimersByTimeAsync(1);
       if (kind === 'mcp') await attributed(PRIME, false, Date.now());
@@ -10598,17 +10641,17 @@ describe('unattributed activity recovery', () => {
     expect(await maintenance()).toMatchObject({ conversationId: SOLO, reason: 'no-tab' });
   });
 
-  it('reopens an ordinary chat that uses this connector the moment its last tab closes mid-turn', async () => {
+  it.each([undefined, false, true])('recovers an owned mid-turn departure only without manual dismissal (manual=%s)', async manual => {
     const SOLO = 'b2b2b2b2-1111-2222-3333-444444444444';
     await pair();
     await events(SOLO, [openTurn('turn-solo-closed')]);
     // One proved call is what makes this chat the app's business at all.
     await attributed(SOLO);
 
-    await request('POST', '/closed', { body: { conversationId: SOLO } });
+    await request('POST', '/closed', { body: { conversationId: SOLO, manual } });
 
     // Nothing is waited out: the close itself is the evidence.
-    expect(chatOf(await maintenance())).toBe(SOLO);
+    expect(chatOf(await maintenance())).toBe(manual === true ? null : SOLO);
   });
 
   /**

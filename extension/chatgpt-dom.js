@@ -1862,9 +1862,23 @@ var CLF_DOM = (() => {
     }, []);
   }
 
-  /** Controls in the leaf's immediate native branch belong to that tool disclosure. */
+  /** Controls structurally owned by one tool disclosure.
+   *
+   * A generated-output action can sit beside a tool row in the same native branch. Treating
+   * every sibling button as part of the tool made localized Edit/Share actions disappear when
+   * the duplicate native tool row was hidden. Keep controls inside the row, plus the observed
+   * sibling disclosure whose semantic label exactly matches the row itself. Anything else is
+   * unrelated native UI and therefore stops the hide climb without reading translated labels.
+   */
   function activityControls(block) {
-    return new Set(block.parentElement?.querySelectorAll?.(ACTIVITY_CONTROL) || []);
+    const own = new Set(block.querySelectorAll?.(ACTIVITY_CONTROL) || []);
+    const label = text(block, 240);
+    for (const control of block.parentElement?.querySelectorAll?.(ACTIVITY_CONTROL) || []) {
+      const semantics = [control.getAttribute?.('aria-label'), control.getAttribute?.('title'), text(control, 240)]
+        .map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+      if (label && semantics.includes(label)) own.add(control);
+    }
+    return own;
   }
 
   /**
@@ -1927,7 +1941,15 @@ var CLF_DOM = (() => {
         if (!covered.has(block)) continue;
         const section = sections.find(candidate => candidate.contains(block));
         const target = section && activityHideTarget(block, section, candidates, covered, allowedControls);
-        if (target) desired.get(section).add(target);
+        if (target) {
+          desired.get(section).add(target);
+          // When unrelated native UI keeps the shared parent visible, retire only this
+          // tool row's own sibling disclosure controls. This avoids leaving an orphaned
+          // chevron while preserving adjacent localized output actions.
+          if (!summaries.has(block)) for (const control of activityControls(block)) {
+            if (control !== target && !target.contains(control)) desired.get(section).add(control);
+          }
+        }
       }
     }
     syncHiddenActivity(turn, desired);
@@ -2267,8 +2289,15 @@ var CLF_DOM = (() => {
     }
   }
 
-  /** Native ChatGPT photo input, observed as #upload-photos. Sending waits for every tile. */
+  /** Native attachment identity from the composer's exact tile/remove control. */
   function composerFileName(button) {
+    const tile = button.closest('[data-composer-attachments] [role="button"][aria-label]');
+    if (tile && tile !== button) {
+      const name = tile.getAttribute('aria-label');
+      const actions = [...tile.querySelectorAll('button')];
+      if (name && actions.length === 1 && actions[0] === button &&
+          [...tile.querySelectorAll('img[alt]')].some(image => image.getAttribute('alt') === name)) return name;
+    }
     const group = button.closest('[role="group"][aria-label]');
     if (group?.querySelector('[data-default-action="true"] button')) {
       const actions = [...group.querySelectorAll('button')].filter(node => !node.closest('[data-default-action="true"]'));
@@ -2320,7 +2349,7 @@ var CLF_DOM = (() => {
         return rows.length ? rows : null;
       }
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
-        panel.getAttribute('aria-labelledby')?.endsWith('-trigger-Plugins'));
+        (panel.querySelector('[data-testid="plugin-icon-wrapper"]') || panel.querySelector('a[href="/plugins"]')));
       if (panels.length !== 1) return null;
       // Installed settings rows are buttons, not the links in the /plugins catalog.
       // Match the name's own leaf so adjacent permission text cannot alter identity.
@@ -2337,7 +2366,12 @@ var CLF_DOM = (() => {
     if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
     if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
-    const input = document.querySelector(files.length ? 'input#upload-files[type="file"]' : 'input#upload-photos[type="file"][accept="image/*"]');
+    // The current shell uses React-generated ids. Elect by the native upload kind
+    // inside this exact composer's form; a second matching input is ambiguous.
+    const host = composerBox();
+    const candidates = [...(host?.querySelectorAll('input[type="file"]') || [])].filter(node =>
+      !node.disabled && (files.length ? !node.accept : node.accept === 'image/*'));
+    const input = candidates.length === 1 ? candidates[0] : null;
     if (!input) return false;
     const priorTiles = new Set((composerBox() || composerActions()?.host)?.querySelectorAll('button[aria-label]') || []);
     const transfer = new DataTransfer();

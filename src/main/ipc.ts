@@ -3,7 +3,9 @@ import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
-import { listSkills } from './skills.js';
+import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
+import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
+import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
@@ -26,6 +28,8 @@ import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
+import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
+import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { applyControlSetting } from './control.js';
 import { pluginRefreshPublications } from './plugin-refresh.js';
 /**
@@ -63,6 +67,7 @@ import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, res
 import { addProject, getSessionProject, listProjects, projectWorkspace, removeProject } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
+import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
@@ -95,7 +100,8 @@ import {
   findSessionByConversation,
   readEvents,
   readRecentEvents,
-  readHandoff
+  readHandoff,
+  readToolEditReview
 } from './session/store.js';
 import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
@@ -461,6 +467,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!target || target !== watchedWindow || target.isDestroyed() || target.webContents.isDestroyed()) return;
     target.webContents.send('projectFiles:changed', event);
   });
+  const projectGitWatches = new ProjectGitWatchSet(event => {
+    const target = getWindow();
+    if (!target || target !== watchedWindow || target.isDestroyed() || target.webContents.isDestroyed()) return;
+    target.webContents.send('projectGit:changed', event);
+  });
+  let projectWatchRequest = 0;
+  const closeProjectWatches = (): void => {
+    projectWatchRequest++;
+    projectFileWatches.close();
+    projectGitWatches.close();
+  };
   handle('setup:profile', async payload => {
     const request = z.discriminatedUnion('action', [
       z.object({ action: z.literal('add'), name: z.string().trim().min(1).max(80) }),
@@ -515,6 +532,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // live theme switch an old opposite background otherwise flashes behind the renderer while it
     // paints again. This is also the color Electron shows during any later renderer reload/failure.
     getWindow()?.setBackgroundColor(windowBackgroundForTheme(next.ui.theme, next.ui.appearance));
+    refreshPetOverlayAppearance();
     if (
       before.goal.enabled !== next.goal.enabled ||
       // The mode is authority too: a draft started as a gate must not be typed after the user
@@ -616,7 +634,77 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('projects:list', () => listProjects());
+  handle('pets:list', async () => petLibraryState());
+  handle('pets:overlayState', async () => petOverlayControlState());
+  handle('pets:overlayVisible', async payload => {
+    const { visible } = z.object({ visible: z.boolean() }).strict().parse(payload);
+    return setPetOverlayVisible(visible);
+  });
+  handle('pets:import', async () => {
+    const options: Electron.OpenDialogOptions = { title: 'Import CoS Pet folder', properties: ['openDirectory'] };
+    const owner = getWindow();
+    const selected = owner && !owner.isDestroyed()
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    return importPet(selected.filePaths[0]);
+  });
+  handle('pets:enabled', async payload => {
+    const { id, enabled } = z.object({ id: z.string().min(1).max(100), enabled: z.boolean() }).strict().parse(payload);
+    const state = setPetEnabled(id, enabled);
+    // Enabling shows the overlay, without restoring other pets dismissed for this run.
+    if (enabled) await setPetOverlayVisible(true, false);
+    return state;
+  });
+  handle('pets:favorite', async payload => {
+    const { id, favorite } = z.object({ id: z.string().min(1).max(100), favorite: z.boolean() }).strict().parse(payload);
+    return setPetFavorite(id, favorite);
+  });
+  handle('pets:delete', async payload => {
+    const { id } = z.object({ id: z.string().min(1).max(100) }).strict().parse(payload);
+    return deletePet(id);
+  });
+  handle('pets:asset', async payload => {
+    const { id, preview } = z.object({ id: z.string().min(1).max(100), preview: z.boolean() }).strict().parse(payload);
+    return loadPetAsset(id, preview);
+  });
   handle('skills:list', () => listSkills());
+  handle('skills:managed', () => listManagedSkills());
+  handle('skills:import', async payload => {
+    const { kind } = z.object({ kind: z.enum(['folder', 'file']) }).strict().parse(payload);
+    const options: Electron.OpenDialogOptions = kind === 'folder'
+      ? { title: 'Import Skill folder', properties: ['openDirectory'] }
+      : { title: 'Import SKILL.md', properties: ['openFile'], filters: [{ name: 'Markdown skills', extensions: ['md'] }] };
+    const owner = getWindow();
+    const selected = owner && !owner.isDestroyed()
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    if (kind === 'folder') await importSkillPackage(selected.filePaths[0]);
+    else await importSkillFile(selected.filePaths[0]);
+    return listManagedSkills();
+  });
+  handle('skills:githubImport', async payload => {
+    const { url } = z.object({ url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
+    return importGitHubSkill(url);
+  });
+  handle('skills:githubLink', async payload => {
+    const { id, url } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
+    return linkGitHubSkill(id, url);
+  });
+  handle('skills:githubCheck', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    return checkGitHubSkillUpdates(id);
+  });
+  handle('skills:githubUpdate', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    return updateGitHubSkill(id, directory => shell.trashItem(directory));
+  });
+  handle('skills:remove', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    await removeSkill(id, directory => shell.trashItem(directory));
+    return listManagedSkills();
+  });
   handle('skills:library', async payload => {
     const scope = z.object({ sessionId: z.string().min(1).max(80).nullable().optional(), projectId: z.string().uuid().nullable().optional() }).strict().parse(payload ?? {});
     const folder = () => scope.sessionId ? getSessionProject(scope.sessionId)
@@ -700,19 +788,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('projectFiles:watch', async payload => {
     const { projectId, directories } = z.object({ projectId: projectFileId.nullable(), directories: z.array(projectRelativePath).max(128) }).strict().parse(payload);
     const target = getWindow();
-    if (!target || target.isDestroyed()) { projectFileWatches.close(); return false; }
+    if (!target || target.isDestroyed()) { closeProjectWatches(); return false; }
     if (target !== watchedWindow) {
-      projectFileWatches.close();
+      closeProjectWatches();
       watchedWindow = target;
       target.webContents.once('destroyed', () => {
-        if (watchedWindow === target) { watchedWindow = null; projectFileWatches.close(); }
+        if (watchedWindow === target) { watchedWindow = null; closeProjectWatches(); }
       });
       target.webContents.on('did-start-loading', () => {
-        if (watchedWindow === target) projectFileWatches.close();
+        if (watchedWindow === target) closeProjectWatches();
       });
     }
+    const request = ++projectWatchRequest;
     await projectFileWatches.sync(projectId, projectId ? directories : []);
-    return true;
+    if (request !== projectWatchRequest || watchedWindow !== target) return false;
+    await projectGitWatches.sync(projectId);
+    return request === projectWatchRequest && watchedWindow === target;
+  });
+  handle('projectGit:snapshot', async payload => {
+    const { projectId, baseRef } = z.object({ projectId: projectFileId,
+      baseRef: z.string().min(1).max(256).optional() }).strict().parse(payload);
+    return readProjectGitSnapshot(projectId, baseRef);
+  });
+  handle('projectGit:diff', async payload => {
+    const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
+      baseRef: z.string().min(1).max(256).optional(), expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/).optional() }).strict().parse(payload);
+    return readProjectGitDiff(projectId, path, baseRef, expectedRevision);
+  });
+  handle('sessions:toolEditReview', async payload => {
+    const { sessionId, callId, changeIndex } = z.object({
+      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+      callId: z.string().uuid(),
+      changeIndex: z.number().int().min(0).max(63)
+    }).strict().parse(payload);
+    return readToolEditReview(sessionId, callId, changeIndex);
   });
   handle('projectFiles:preview', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
@@ -1085,6 +1194,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // A blocked worker chat frees its swarm slot now, not on the next 30-second pass: the
     // user pressing Block on a worker is usually about to start something in its place.
     if (blocked) await sweepStaleSwarm().catch(() => undefined);
+    refreshPetOverlayActivities();
     return blockedChatIds();
   });
 
