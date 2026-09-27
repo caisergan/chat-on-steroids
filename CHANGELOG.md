@@ -13,15 +13,17 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## [2.1.17] — Docks, pets and skills
 
-This update brings in the latest upstream work: a new workspace dock with a read-only Git review, a Skills library, desktop pets, and fixes for ChatGPT's newest composer and setup screens. Search as a ChatGPT browser and the `cos` command stay as they were.
+This update brings in the latest upstream work: a new workspace dock with a read-only Git review, a Skills library with recommended skills, desktop pets, Python plugins that install without setup, and fixes for ChatGPT's newest composer and setup screens. Search as a ChatGPT browser and the `cos` command stay as they were.
 
 ### New
 
 - **Workspace docks.** Files, terminals and the new **Changes** view dock on either side of the chat or along the bottom, and open as tabs.
 - **Review Git changes without leaving the app.** Changes lists what changed in a local project since HEAD, compares local branches without checking them out, and opens the exact edit a tool call made. It never stages, commits or pushes.
-- **Skills library.** A Skills page in the sidebar lists your installed skills and imports a folder, a single SKILL.md or a public GitHub skill. A skill linked to GitHub shows when an update is available; installing it stays your choice.
+- **Skills library.** A Skills page in the sidebar lists your installed skills and imports a folder, a single SKILL.md or a public GitHub skill. A skill linked to GitHub shows when an update is available; installing it stays your choice. The page also recommends 18 skills that ship with the app, such as code review, debugging and security review; nothing is installed until you click Install.
 - **Desktop pets.** Pets now live on the desktop and react to the work running in CoS. You can drag, throw and dismiss them. A Pets page lists the built-in pet and pets you import from a folder, and **View → Desktop Pets** shows or hides them. Pets stay off until you enable one.
 - **The companion extension is translated** into German, Spanish, French, Japanese, Turkish and Chinese.
+- **Python plugins install without setup.** Plugins such as Web Fetch no longer need uv on your computer: CoS downloads a pinned, checksum-verified uv when it is missing, and uv provides Python. Your own uv is still preferred.
+- **Playful status words (optional).** Settings → Playful status words swaps "Working" in a chat's status line for rotating jokes. Off by default.
 
 ### Fixed
 
@@ -29,12 +31,16 @@ This update brings in the latest upstream work: a new workspace dock with a read
 - **Setup matches ChatGPT's new settings:** custom apps are created from the Plugins page with **Add → Create MCP App**, since the Developer mode switch is gone.
 - **Connect works right after typing** a Tunnel ID or API key in Setup.
 - **Workers start even if their saved default model is gone.** They use ChatGPT's current model and say which default was unavailable.
+- **Goal and Loop keep working when their saved model is gone.** They use ChatGPT's current selection instead of failing every decision.
 - **Workers are told their report was recorded**, not that it was already delivered.
 - **Safer desktop control on macOS:** a click is refused when another window covers the exact point, and windows on other Spaces are found reliably.
 - **Git is found safely on each platform**, and a Mac without the Command Line Tools reports Git as unavailable instead of opening a dialog.
 
 ### Improved
 
+- **Setup shows its progress** ("2 of 6 steps done") and numbers the open steps.
+- **The Usage page is easier to read:** limits come first, daily cost is a 30-day chart, and the activity heatmap starts at your first recorded day.
+- **A thin scrollbar stays visible** on macOS, so long pages show that they scroll.
 - **Smoother motion:** the sidebar, docks and message box grow and shrink smoothly.
 - **Removed lines show in red** on tool calls.
 - **Updated usage cost rates**, including ChatGPT's 5.5 models.
