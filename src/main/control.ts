@@ -27,7 +27,7 @@ import { REASONING_EFFORTS } from '../shared/session.js';
 import type { InputEntry } from './session/input.js';
 import type { SessionEvent } from '../shared/session.js';
 import { getSession, listSessionPage, readOverflowText, readRecentEvents } from './session/store.js';
-import { listInputs } from './session/input.js';
+import { listInputs, sessionInputPolicy } from './session/input.js';
 import { cancelDesktopInput, ready, sendDesktopInput } from './session/start-input.js';
 import {
   CONTROL_PROTOCOL,
@@ -260,18 +260,22 @@ async function createTask(body: unknown): Promise<{ taskId: string; sessionId: s
   if (reason) throw new ControlHttpError(409, 'not_ready', reason);
   let projectId: string | null = args.project ? await resolveProject(args.project) : null;
   let existing: string | null = null;
+  let busy = false;
   if (args.session) {
     existing = sessionId(args.session);
     const session = await getSession(existing);
     if (!session) throw new ControlHttpError(404, 'not_found', 'No such session');
     if (projectId && session.projectId !== projectId) throw new ControlHttpError(400, 'bad_request', 'That session belongs to a different project');
     projectId = session.projectId ?? null;
+    busy = !!session.conversationId && !(await sessionInputPolicy(existing)).browserAllowed;
   }
   const id = crypto.randomUUID();
   const entry = await sendDesktopInput({
     id, sessionId: existing, projectId, text: args.text,
-    // A new chat starts immediately; a follow-up waits for the chat's current turn instead of interrupting it.
-    mode: existing ? 'after-turn' : 'auto',
+    // A follow-up waits for a running turn instead of interrupting it. An idle chat is sent at
+    // once: an after-turn row only fires on a turn that ends after it was queued, so it would
+    // sit queued forever in a chat that has nothing left running.
+    mode: busy ? 'after-turn' : 'auto',
     dueAt: Date.now(), model: args.model ?? null, reasoningEffort: args.effort ?? null
   });
   return { taskId: entry.id, sessionId: entry.sessionId ?? null };
