@@ -373,12 +373,25 @@ describe('account-observed worker admission', () => {
     expect(swarmRunning()).toBe(false);
   });
 
-  it('validates effective app defaults before reservation', async () => {
+  it('uses ChatGPT\'s current reasoning, and says so, when the saved default effort is not offered', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultModel: '5.6', defaultReasoning: 'ultra' } });
     try {
-      expect(() => spawn({ caller: prime, workers: [{ task: 'defaults' }] })).toThrow(/reasoning_effort "ultra"/);
-      expect(swarmRunning()).toBe(false);
+      const result = spawn({ caller: prime, workers: [{ task: 'defaults' }] });
+      expect(result.created[0]).toMatchObject({ model: '5.6', reasoningEffort: null });
+      expect(result.defaultNotes).toEqual([expect.stringMatching(/default worker reasoning "ultra" saved in Settings is not offered for model "5.6"/)]);
+    } finally { await setEnabled(true); }
+  });
+
+  // #499: a default saved before 2.1.15 read picker lanes stopped matching, and every spawn failed.
+  it('uses ChatGPT\'s current model when the saved default model is not offered, but keeps explicit requests strict', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultModel: 'gpt-5.6-sol', defaultReasoning: 'high' } });
+    try {
+      const result = spawn({ caller: prime, workers: [{ task: 'stale default' }, { task: 'second' }] });
+      expect(result.created.map(worker => [worker.model, worker.reasoningEffort])).toEqual([[null, 'high'], [null, 'high']]);
+      expect(result.defaultNotes).toEqual([expect.stringMatching(/default worker model "gpt-5.6-sol" saved in Settings is not offered/)]);
+      expect(() => spawn({ caller: prime, workers: [{ task: 'explicit', model: 'gpt-5.6-sol' }] })).toThrow(/not observed/);
     } finally { await setEnabled(true); }
   });
 
@@ -3320,7 +3333,22 @@ describe('through the MCP endpoint', () => {
 
     const finished = await asChat('c-worker-1', 'finish', { result: 'parked-prime-report' });
     expect(finished).toMatch(/reported and is now asleep/i);
+    expect(finished).toContain('This acknowledgment does not confirm delivery to the prime');
+    expect(finished).not.toContain('The prime agent has your result');
     expect(swarmRunning()).toBe(false);
+
+    const pending = () => snapshotSwarm()!.dormantRuns
+      ?.find(family => family.primeConversationId === PRIME_CHAT)
+      ?.agents.find(agent => agent.info.id === PRIME_ID)?.queue ?? [];
+    expect(pending()).toHaveLength(1);
+    expect(pending()[0]).toMatchObject({ offeredAt: null, offers: 0, ackedAt: null });
+    const retry = await asChat('c-worker-1', 'finish', { result: 'retry must not replace the original report' });
+    expect(retry).toContain('This acknowledgment does not confirm delivery to the prime');
+    expect(retry).not.toContain('already has that result');
+    expect(pending()).toHaveLength(1);
+    expect(pending()[0]).toMatchObject({ offeredAt: null, offers: 0, ackedAt: null });
+    expect(pending()[0]!.text).toContain('parked-prime-report');
+    expect(pending()[0]!.text).not.toContain('retry must not replace');
 
     // The final worker report lives in A's dormant prime queue. There is no live agent:prime
     // identity to address here, so delivery must resolve from the exact prime conversation.
@@ -3602,6 +3630,8 @@ describe('through the MCP endpoint', () => {
 
     const workerResult = await asChat('c-worker-1', 'finish', { result: 'all of it done' });
     expect(workerResult).toContain('reached its context limit');
+    expect(workerResult).toContain('This acknowledgment does not confirm delivery to the prime');
+    expect(workerResult).not.toContain('The prime agent has your result');
     expect(workerResult).not.toContain('remains reusable');
     const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
       message.text.includes('[worker-1 finished]')

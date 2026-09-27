@@ -21,6 +21,9 @@ interface DomApi {
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
   uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
   messages(): Array<{ id: string; role: 'user' | 'assistant'; text: string; turnId: string | null }>;
+  turns(): Array<{ id: string | null; role: string; node: HTMLElement; nodes: HTMLElement[] }>;
+  toolBlocks(turn: ReturnType<DomApi['turns']>[number]): HTMLElement[];
+  hideActivity(turn: ReturnType<DomApi['turns']>[number], covered: HTMLElement[]): void;
 }
 let dom: JSDOM;
 let document: Document;
@@ -525,6 +528,55 @@ function upload() {
   return input;
 }
 describe('native image readiness', () => {
+  it.each(['wrong filename', 'multiple actions', 'outside attachments'])('rejects a shell attachment lookalike: %s', variant => {
+    const holder = document.createElement('div'); holder.setAttribute('data-composer-attachments', '');
+    holder.innerHTML = '<div role="button" aria-label="app.webp"><img alt="app.webp"><button aria-label="Remover app.webp"></button></div>';
+    if (variant === 'wrong filename') holder.querySelector('img')!.alt = 'other.webp';
+    if (variant === 'multiple actions') holder.firstElementChild!.append(document.createElement('button'));
+    if (variant === 'outside attachments') holder.removeAttribute('data-composer-attachments');
+    document.querySelector('form')!.append(holder);
+    expect(api.hasComposerAttachments()).toBe(false);
+  });
+  it('recognizes the shell image tile by filename and its unique localized remove action', async () => {
+    const input = upload(); input.id = '_r_image_';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    document.execCommand = command => { if (command === 'delete') box.replaceChildren(); return true; };
+    input.addEventListener('change', () => {
+      const holder = document.createElement('div'); holder.setAttribute('data-composer-attachments', '');
+      holder.innerHTML = '<div role="button" aria-label="app.webp"><img alt="app.webp"><button aria-label="Remover app.webp"></button></div>';
+      holder.querySelector('button')!.addEventListener('click', () => holder.remove());
+      document.querySelector('form')!.append(holder);
+    });
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => true, draft)).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(true);
+    expect(await draft.clear()).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
+  });
+  it.each([false, true])('uses the current composer upload kind with dynamic ids (files=%s)', async files => {
+    const input = upload(); input.id = '_r_photo_';
+    if (files) { input.id = '_r_file_'; input.accept = ''; }
+    const media = document.createElement('input'); media.type = 'file'; media.accept = 'image/*,video/*';
+    input.after(media);
+    const foreign = input.cloneNode() as HTMLInputElement; foreign.id = 'upload-photos';
+    document.body.prepend(foreign);
+    const wrong = vi.fn(); foreign.addEventListener('change', wrong); media.addEventListener('change', wrong);
+    input.addEventListener('change', () => {
+      const tile = document.createElement('button'); tile.setAttribute('aria-label', 'Remove file: app.webp');
+      document.querySelector('form')!.append(tile);
+    });
+    const image = { name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' };
+    const originals = files ? [new dom.window.File(['bytes'], image.name, { type: 'image/webp' })] : [];
+    expect(await api.uploadImages(files ? [] : [image], () => true, undefined, originals)).toBe(true);
+    expect(wrong).not.toHaveBeenCalled();
+  });
+  it.each(['duplicate', 'disabled', 'foreign'])('does not dispatch an upload with %s native ownership', async reason => {
+    const input = upload(); const changed = vi.fn(); input.addEventListener('change', changed);
+    if (reason === 'duplicate') input.after(input.cloneNode());
+    if (reason === 'disabled') input.disabled = true;
+    if (reason === 'foreign') document.body.append(input);
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }])).toBe(false);
+    expect(changed).not.toHaveBeenCalled();
+  });
   it.each(['rename', 'replacement', 'extra file', 'cancel'])('retains exact image upload nodes across %s while processing', async change => {
     const input = upload();
     const tile = document.createElement('button');
@@ -836,5 +888,26 @@ describe('locale-independent provider composer evidence', () => {
     group.firstElementChild!.setAttribute('data-default-action', 'true');
     group.append(group.lastElementChild!.cloneNode(true));
     expect(api.hasComposerAttachments()).toBe(false);
+  });
+
+  it.each(['画像を編集', '分享此图片'])('keeps a localized generated-output action beside a hidden duplicate tool row (%s)', actionLabel => {
+    const section = document.createElement('section');
+    section.setAttribute('data-testid', 'conversation-turn-output-action');
+    section.setAttribute('data-turn', 'assistant');
+    section.setAttribute('data-turn-id', 'output-action');
+    const layout = document.createElement('div');
+    const branch = document.createElement('div');
+    const tool = document.createElement('span'); tool.className = 'tool-message'; tool.textContent = 'Called image tool';
+    const disclosure = document.createElement('button'); disclosure.setAttribute('aria-label', 'Called image tool');
+    const action = document.createElement('button'); action.setAttribute('aria-label', actionLabel);
+    branch.append(tool, disclosure, action); layout.append(branch); section.append(layout); document.body.append(section);
+
+    const turn = api.turns().find(item => item.id === 'output-action')!;
+    const blocks = api.toolBlocks(turn);
+    expect(blocks).toEqual([tool]);
+    api.hideActivity(turn, blocks);
+    expect(tool.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(disclosure.getAttribute('data-clf-native-hidden')).toBe('1');
+    expect(action.closest('[data-clf-native-hidden]')).toBeNull();
   });
 });

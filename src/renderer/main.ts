@@ -8,6 +8,8 @@ import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initPet } from './pet.js';
+import { initPets } from './pets.js';
+import { initSkillsLibrary } from './skills-library.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -49,7 +51,7 @@ declare global {
 
 const api = window.api;
 initLanguage();
-initPet();
+const pet = initPet(api, () => showTab('pets'));
 initSetupGuide();
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
@@ -129,9 +131,13 @@ let setupKeySave: Promise<boolean> = Promise.resolve(true);
 
 // ------------------------------------------------------------------- tabs
 
+let openSkillsLibrary: () => void = () => undefined;
+
 function showTab(name: string): void {
-  const settings = name !== 'chat' && name !== 'plugins';
-  document.querySelector<HTMLElement>('.app')!.dataset.screen = name === 'plugins' ? 'library' : settings ? 'settings' : 'chat';
+  if (name === 'skills') openSkillsLibrary();
+  const library = name === 'plugins' || name === 'skills' || name === 'pets';
+  const settings = name !== 'chat' && !library;
+  document.querySelector<HTMLElement>('.app')!.dataset.screen = library ? 'library' : settings ? 'settings' : 'chat';
   document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
   $('sidebarPrimary').hidden = settings;
   $('workspaceSettings').hidden = false;
@@ -200,6 +206,10 @@ $('sessionList').addEventListener('click', event => {
 }, { capture: true });
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
+$('sidebarPets').addEventListener('click', () => showTab('pets'));
+$('sidebarSkills').addEventListener('click', () => showTab('skills'));
+$('viewPets').addEventListener('click', () => { ($('viewMenu') as HTMLDetailsElement).open = false; pet.toggle(); });
+api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
 $('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
@@ -694,8 +704,13 @@ function isRunning(value: AppState['status']['state']): boolean {
   );
 }
 
+interface SetupConnectionValues { tunnelId: string; hasApiKey: boolean }
+
 /** What still has to happen before connecting can work, in the order of the wizard. */
-function missingStep(next: AppState): { step: string; text: string } | null {
+function missingStep(
+  next: AppState,
+  values: SetupConnectionValues = { tunnelId: next.config.tunnel.tunnelId, hasApiKey: next.hasApiKey }
+): { step: string; text: string } | null {
   const { config } = next;
   // This is the same capability rule as the main-process admission gate. Desktop and
   // clipboard may legitimately be rootless; enabling one must not hide a root still needed
@@ -704,19 +719,34 @@ function missingStep(next: AppState): { step: string; text: string } | null {
     return { step: 'folder', text: t("Choose a folder to share — step 1.") };
   }
   if (config.tunnel.kind === 'openai') {
-    if (!TUNNEL_ID_PATTERN.test(config.tunnel.tunnelId)) {
+    if (!TUNNEL_ID_PATTERN.test(values.tunnelId)) {
       return { step: 'tunnel', text: t("Create a tunnel and paste its ID — step 2.") };
     }
-    if (!(next.secureStorage?.available ?? true) && !next.hasApiKey) {
+    if (!(next.secureStorage?.available ?? true) && !values.hasApiKey) {
       return { step: 'key', text: next.secureStorage?.detail ?? t("Secure credential storage is unavailable.") };
     }
-    if (!next.hasApiKey) {
+    if (!values.hasApiKey) {
       return { step: 'key', text: t("Add a restricted API key — step 3.") };
     }
   } else if (!next.resolvedBinary && config.tunnel.kind === 'cloudflared') {
     return { step: 'connect', text: t("cloudflared was not found on this computer.") };
   }
   return null;
+}
+
+/**
+ * Readiness for a click the user can make now, including a Tunnel ID or API key still typed into
+ * Setup. Persisted state stays authoritative everywhere else; this only keeps Connect enabled so
+ * the click itself can store those drafts (see `persistSetupDraftsForConnection`). Adapted from
+ * @Haz4rdovisk's #345: before, typing both and clicking Connect did nothing, because the values
+ * were only stored on blur and the button was still disabled when the click landed.
+ */
+function currentSetupMissingStep(next: AppState): { step: string; text: string } | null {
+  const key = $<HTMLInputElement>('apiKey');
+  return missingStep(next, {
+    tunnelId: $<HTMLInputElement>('tunnelId').value.trim(),
+    hasApiKey: next.hasApiKey || (next.secureStorage?.available !== false && key.value !== '')
+  });
 }
 
 interface RootRenameState {
@@ -1067,6 +1097,18 @@ function paintSetupFields(): void {
     input.classList.toggle('is-empty', !stored && input.value.trim() === '');
     input.setAttribute('aria-required', String(!stored));
   }
+  if (state) paintConnectButtons(state);
+}
+
+/** Connect is enabled from the persisted state or from valid drafts still in the fields. */
+function paintConnectButtons(next: AppState): void {
+  const running = isRunning(next.status.state), disconnecting = next.status.state === 'disconnecting';
+  const missing = currentSetupMissingStep(next);
+  for (const id of ['connectionPopoverToggle', 'wizConnect']) {
+    const button = $<HTMLButtonElement>(id);
+    button.disabled = disconnecting || (!running && missing !== null);
+    button.title = !running && missing ? missing.text : '';
+  }
 }
 
 function apply(next: AppState): void {
@@ -1084,7 +1126,7 @@ function apply(next: AppState): void {
   const busy = disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel';
   const failed = status.state === 'auth-failed' || status.state === 'tunnel-unavailable';
   const running = isRunning(status.state);
-  const missing = missingStep(next);
+  const missing = currentSetupMissingStep(next);
 
   // ---- theme
   const appearanceUi = requestedSettings?.ui ?? config.ui;
@@ -1760,6 +1802,12 @@ async function dropFolders(event: DragEvent): Promise<void> {
 
 async function toggleConnection(): Promise<void> {
   if (!state || state.status.state === 'disconnecting') return;
+  if (!isRunning(state.status.state) && !(await persistSetupDraftsForConnection())) {
+    const missing = state ? missingStep(state) : null;
+    if (missing) { showTab('setup'); step(missing.step).scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    return;
+  }
+  if (!state) return;
   // Mirrors the button label exactly, so a click always does what it says.
   const next = await run(isRunning(state.status.state) ? api.disconnect() : api.connect());
   if (next) apply(next);
@@ -1910,10 +1958,10 @@ $('copyLogJson').addEventListener('click', async () => {
 
 // The API key is written on blur so it is not saved keystroke by keystroke.
 for (const id of ['tunnelId', 'apiKey']) $(id).addEventListener('input', paintSetupFields);
-$('apiKey').addEventListener('blur', () => {
+function storeSetupApiKeyDraft(): Promise<boolean> {
   const input = $<HTMLInputElement>('apiKey');
   const submitted = input.value;
-  if (submitted === '') return;
+  if (submitted === '') return Promise.resolve(true);
   const owner = state?.config.tunnel.profileId;
   setupKeySave = (async () => {
     const next = await run(api.setApiKey(submitted, owner));
@@ -1928,7 +1976,27 @@ $('apiKey').addEventListener('blur', () => {
     }
     return next !== null;
   })();
-});
+  return setupKeySave;
+}
+$('apiKey').addEventListener('blur', () => { void storeSetupApiKeyDraft(); });
+
+/**
+ * Store the Tunnel ID and API key still typed into Setup before connecting. Blur and change are
+ * conveniences; a Connect click must work without them.
+ */
+async function persistSetupDraftsForConnection(): Promise<boolean> {
+  if (!state) return false;
+  await settingsSaveQueue;
+  if (!state) return false;
+  if ($<HTMLInputElement>('tunnelId').value.trim() !== state.config.tunnel.tunnelId) await save();
+  await settingsSaveQueue;
+  if (!state || $<HTMLInputElement>('tunnelId').value.trim() !== state.config.tunnel.tunnelId) return false;
+  // A blur right before the click may already own this write; drain it, then store a newer draft.
+  await setupKeySave;
+  if ($<HTMLInputElement>('apiKey').value !== '' && !(await storeSetupApiKeyDraft())) return false;
+  await setupKeySave;
+  return state !== null && missingStep(state) === null;
+}
 
 $('removeApiKey').addEventListener('click', async () => {
   const next = await run(api.setApiKey('', state?.config.tunnel.profileId));
@@ -1985,6 +2053,8 @@ buildGroups();
 initSidebarResize();
 initUsage();
 initPlugins(apply);
+initPets(api, pet);
+openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
 initChat({ save: () => save(), state: () => state });
 

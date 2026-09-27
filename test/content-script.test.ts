@@ -8141,7 +8141,7 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(live.sent.some(message => message.type === 'reload_owned_chat')).toBe(false);
   });
 
-  it('records two generated gallery assets once each despite nine native presentation clones', async () => {
+  it.each(['estuary', 'blob'])('records two generated gallery assets once each despite nine %s presentation clones', async transport => {
     live = await harness();
     const section = assistantTurn(live.document, 'turn-generated-gallery', []);
     section.setAttribute('data-clf-fiber-turn', '0');
@@ -8149,12 +8149,13 @@ describe('a stop button that goes missing while the turn is still running', () =
     const blue = 'file_000000005f2c823085a542762d1de785';
     const orange = 'file_00000000dc58821198efef946a9ade33';
     const chosen: string[] = [];
+    const nodeAssets = new WeakMap<HTMLImageElement, string>();
     const canvasSources = new WeakMap<HTMLCanvasElement, HTMLImageElement>();
     (live.window.HTMLCanvasElement.prototype as any).getContext = function () {
-      return { drawImage: (node: HTMLImageElement) => { canvasSources.set(this, node); chosen.push(new URL(node.src).searchParams.get('id')!); } };
+      return { drawImage: (node: HTMLImageElement) => { canvasSources.set(this, node); chosen.push(nodeAssets.get(node)!); } };
     };
     (live.window.HTMLCanvasElement.prototype as any).toBlob = function (callback: (blob: any) => void) {
-      const id = new URL(canvasSources.get(this)!.src).searchParams.get('id')!;
+      const id = nodeAssets.get(canvasSources.get(this)!)!;
       const bytes = new TextEncoder().encode(id === blue ? 'blue-webp' : 'orange-webp');
       callback({ type: 'image/webp', size: bytes.length, arrayBuffer: async () => bytes.buffer });
     };
@@ -8163,7 +8164,10 @@ describe('a stop button that goes missing while the turn is still running', () =
         const group = live!.document.createElement('div');
         group.className = 'group/imagegen-image';
         const image = live!.document.createElement('img');
-        image.src = `https://chatgpt.com/backend-api/estuary/content?id=${assetId}&sig=private-${index}`;
+        image.src = transport === 'blob' ? `blob:https://chatgpt.com/${assetId}-${index}`
+          : `https://chatgpt.com/backend-api/estuary/content?id=${assetId}&sig=private-${index}`;
+        nodeAssets.set(image, assetId);
+        if (transport === 'blob') image.setAttribute('data-clf-fiber-image-source', image.src);
         image.setAttribute('data-clf-fiber-image', `0:${encodeURIComponent(messageId)}:${encodeURIComponent(assetId)}`);
         Object.defineProperties(image, {
           complete: { configurable: true, value: true },
@@ -8195,6 +8199,7 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(events.filter(event => event.previewStatus === 'available').map(event => event.providerAssetId)).toEqual([blue, orange]);
     expect(chosen).toEqual([blue, orange]);
     expect(JSON.stringify(events)).not.toContain('sig=');
+    expect(JSON.stringify(events)).not.toContain('blob:');
     expect(section.querySelectorAll('[data-clf-fiber-image]')).toHaveLength(9);
 
     await replyFiber([], [{ turnId: 'turn-generated-gallery', conversationId, messages: [], activities: [], images }]);
@@ -11685,6 +11690,101 @@ describe('the activity feed', () => {
 
     expect(labels(section)).toEqual(['Called tool', 'Called tool']);
     expect(section.querySelectorAll('.clf-tool-icon svg')).toHaveLength(0);
+  });
+});
+
+describe('content-script localization', () => {
+  function localized(translations: Record<string, string>) {
+    return (_document: Document, dom: JSDOM) => {
+      (dom.window as any).CLF_I18N = {
+        t(key: string, fallback: string, substitutions?: unknown | unknown[]) {
+          let value = translations[key] ?? fallback;
+          const args = Array.isArray(substitutions)
+            ? substitutions
+            : substitutions === undefined || substitutions === null
+              ? []
+              : [substitutions];
+          for (let index = 0; index < args.length; index++) {
+            value = value.split(`$${index + 1}`).join(String(args[index]));
+          }
+          return value;
+        }
+      };
+    };
+  }
+
+  it('uses the page-local catalog for settings, accessibility and progress labels', async () => {
+    live = await harness(undefined, {}, localized({
+      content_settings_aria: 'Chat On Steroids ayarları',
+      content_mode_off: 'Kapalı',
+      content_mode_goal: 'Hedef',
+      content_mode_loop: 'Döngü',
+      content_goal_mode_aria: 'Hedef modu',
+      content_compact_resume_now: 'Sıkıştır ve devam et',
+      content_waiting_local_tools: '$1 yerel aracın bitmesi bekleniyor',
+      content_goal_sending_answer_to: 'Yanıt $1 hedefine gönderiliyor'
+    }));
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+
+    const control = live.document.querySelector('.clf-compact-btn') as HTMLElement;
+    const menu = live.document.querySelector('.clf-menu') as HTMLElement;
+    expect(control.getAttribute('aria-label')).toBe('Chat On Steroids ayarları');
+    expect(menu.getAttribute('aria-label')).toBe('Chat On Steroids ayarları');
+    expect(menu.querySelector('.clf-menu-mode-track')?.getAttribute('aria-label')).toBe('Hedef modu');
+    expect([...menu.querySelectorAll('.clf-menu-mode-option')].map(node => node.textContent)).toEqual([
+      'Kapalı',
+      'Hedef',
+      'Döngü'
+    ]);
+    expect(menu.querySelector('.clf-menu-action')?.textContent).toBe('Sıkıştır ve devam et');
+
+    expect(live.hook.stageView({
+      now: 10000,
+      changedAt: 0,
+      progress: { tools: { count: 3, since: 0 } }
+    })).toMatchObject({ stage: '3 yerel aracın bitmesi bekleniyor' });
+    expect(live.hook.goalStageView({
+      phase: 'requesting',
+      error: '',
+      model: 'vendor/model-x',
+      draft: null
+    })).toMatchObject({
+      stage: 'Yanıt OpenRouter hedefine gönderiliyor',
+      detail: 'model-x'
+    });
+  });
+
+  it('localizes the bootstrap fold while preserving the authored prompt and raw errors', async () => {
+    const brief = 'TASK — keep this exact authored text';
+    live = await harness(undefined, {}, localized({
+      content_bootstrap_handoff: 'Uygulamanın taşıdığı devir özeti — bunu sen yazmadın',
+      content_goal_loop_stopped: 'Hedef döngüsü durdu'
+    }));
+    const section = userTurn(live.document, 'i18n-bootstrap', brief);
+    const bootstrapMessageId = section.querySelector('[data-message-id]')!.getAttribute('data-message-id');
+    live.reply.set('activity', () => ({
+      ok: true,
+      data: { entries: [], bootstrap: 'resume', bootstrapMessageId, job: null }
+    }));
+
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(section.querySelector('.clf-boot-label')?.textContent).toBe(
+      'Uygulamanın taşıdığı devir özeti — bunu sen yazmadın'
+    );
+    expect(section.querySelector('.clf-boot-preview')?.textContent).toBe(brief);
+    expect(section.querySelector('.whitespace-pre-wrap')?.textContent).toBe(brief);
+    expect(live.hook.goalStageView({
+      phase: 'requesting',
+      error: 'RAW PROVIDER ERROR',
+      model: 'vendor/model-x',
+      draft: null
+    })).toMatchObject({
+      stage: 'Hedef döngüsü durdu',
+      detail: 'RAW PROVIDER ERROR'
+    });
   });
 });
 
